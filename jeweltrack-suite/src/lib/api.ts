@@ -215,6 +215,26 @@ export const updateStore = async (id: string, storeData: any) => {
   return response.json();
 };
 
+export const updateStorePreferences = async (id: string, preferences: any) => {
+  const response = await fetch(`${API_BASE_URL}/store/${id}/preferences`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preferences }),
+  });
+  if (!response.ok) throw new Error('Failed to update store preferences');
+  return response.json();
+};
+
+export const updateStoreSubPromptTs = async (id: string, sub_prompt_ts: number) => {
+  const response = await fetch(`${API_BASE_URL}/store/${id}/sub-prompt-ts`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sub_prompt_ts }),
+  });
+  if (!response.ok) throw new Error('Failed to update sub prompt timestamp');
+  return response.json();
+};
+
 export const updateUser = async (id: string, userData: any) => {
   const response = await fetch(`${API_BASE_URL}/users/${id}`, {
     method: 'PUT',

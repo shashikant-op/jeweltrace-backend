@@ -26,16 +26,39 @@ app.get('/', (req, res) => {
 });
 
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, status: 'ok', database: sequelize.getDatabaseName() });
+  res.json({ 
+    success: true, 
+    status: 'ok', 
+    database: sequelize.getDatabaseName(),
+    timestamp: new Date().toISOString(),
+    version: '1.0.1' // Increment this to verify deployment
+  });
+});
+
+// Diagnostic route to list all registered routes
+app.get('/api/routes', (req, res) => {
+  const routes: string[] = [];
+  app._router.stack.forEach((middleware: any) => {
+    if (middleware.route) {
+      routes.push(`${Object.keys(middleware.route.methods).join(',').toUpperCase()} ${middleware.route.path}`);
+    } else if (middleware.name === 'router') {
+      middleware.handle.stack.forEach((handler: any) => {
+        if (handler.route) {
+          routes.push(`${Object.keys(handler.route.methods).join(',').toUpperCase()} ${handler.route.path}`);
+        }
+      });
+    }
+  });
+  res.json({ success: true, routes });
 });
 
 // Initialize Sequelize with TiDB Cloud individual variables
 const sequelize = new Sequelize(
   process.env.DB_DATABASE || 'test',
-  process.env.DB_USERNAME || 'root',
-  process.env.DB_PASSWORD || '',
+  process.env.DB_USERNAME || '3vTNZ2nDFDWfTru.root',
+  process.env.DB_PASSWORD || 'c0PVUMdaKq3zc1KJ',
   {
-    host: process.env.DB_HOST || 'localhost',
+    host: process.env.DB_HOST || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com',
     port: parseInt(process.env.DB_PORT || '4000'),
     dialect: 'mysql',
     logging: process.env.NODE_ENV === 'development' ? console.log : false,
@@ -67,6 +90,8 @@ Store.init({
   currency: { type: DataTypes.STRING(10), defaultValue: 'INR' },
   tax_rate: { type: DataTypes.FLOAT, defaultValue: 3 },
   upi_id: { type: DataTypes.STRING(100) },
+  preferences: { type: DataTypes.JSON, defaultValue: {} },
+  sub_prompt_ts: { type: DataTypes.BIGINT, defaultValue: 0 },
 }, { sequelize, modelName: 'store', underscored: true });
 
 class User extends Model {}
@@ -909,15 +934,31 @@ app.get('/api/metal-rates', async (req, res) => {
   try {
     const { storeId } = req.query;
     if (!storeId) return res.status(400).json({ success: false, message: 'storeId required' });
-    let rates = await MetalRate.findOne({ where: { store_id: storeId as string } });
-    if (!rates) {
-      rates = await MetalRate.create({
+    console.log("======================================================url", req.url);
+    console.log("======================================================storeId", storeId);
+    // Find or create the metal rate record
+    let [rates, created] = await MetalRate.findOrCreate({
+      where: { store_id: storeId as string },
+      defaults: {
         id: uuidv4(),
-        store_id: storeId as string
-      });
+        store_id: storeId as string,
+        gold_24k_per_gm: 0,
+        gold_22k_per_gm: 0,
+        gold_18k_per_gm: 0,
+        silver_per_gm: 0,
+        platinum_per_gm: 0
+      }
+    });
+
+    if (created) {
+      console.log(`Created default rates for store ${storeId}`);
+    } else {
+      console.log(`Fetched existing rates for store ${storeId}`);
     }
+
     res.json({ success: true, rates });
   } catch (error: any) {
+    console.error("Error fetching metal rates:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -926,9 +967,11 @@ app.put('/api/metal-rates', async (req, res) => {
   try {
     const { storeId, gold_24k_per_gm, gold_22k_per_gm, gold_18k_per_gm, silver_per_gm, platinum_per_gm } = req.body;
     if (!storeId) return res.status(400).json({ success: false, message: 'storeId required' });
-    let rates = await MetalRate.findOne({ where: { store_id: storeId as string } });
-    if (!rates) {
-      rates = await MetalRate.create({
+    
+    // Find or create the metal rate record
+    let [rates, created] = await MetalRate.findOrCreate({
+      where: { store_id: storeId as string },
+      defaults: {
         id: uuidv4(),
         store_id: storeId as string,
         gold_24k_per_gm: Number(gold_24k_per_gm) || 0,
@@ -936,8 +979,10 @@ app.put('/api/metal-rates', async (req, res) => {
         gold_18k_per_gm: Number(gold_18k_per_gm) || 0,
         silver_per_gm: Number(silver_per_gm) || 0,
         platinum_per_gm: Number(platinum_per_gm) || 0
-      });
-    } else {
+      }
+    });
+
+    if (!created) {
       await rates.update({
         gold_24k_per_gm: Number(gold_24k_per_gm) || 0,
         gold_22k_per_gm: Number(gold_22k_per_gm) || 0,
@@ -946,8 +991,11 @@ app.put('/api/metal-rates', async (req, res) => {
         platinum_per_gm: Number(platinum_per_gm) || 0
       });
     }
+
+    console.log(`${created ? 'Created' : 'Updated'} rates for store ${storeId}:`, rates.toJSON());
     res.json({ success: true, rates });
   } catch (error: any) {
+    console.error("Error updating metal rates:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -1129,6 +1177,28 @@ app.put('/api/store/:id', async (req, res) => {
     await Store.update(storeData, { where: { id } });
     const updatedStore = await Store.findByPk(id);
     res.json({ success: true, store: updatedStore });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+app.put('/api/store/:id/preferences', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { preferences } = req.body;
+    await Store.update({ preferences }, { where: { id } });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+app.put('/api/store/:id/sub-prompt-ts', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { sub_prompt_ts } = req.body;
+    await Store.update({ sub_prompt_ts }, { where: { id } });
+    res.json({ success: true });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -1782,7 +1852,7 @@ app.get('/api/subscription/upi', async (req, res) => {
   }
 });
 // Create Razorpay payment link for subscription
-app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }), async (req: express.Request, res: express.Response) => {
   try {
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
     if (!secret) return res.status(500).send('Webhook secret not configured');
@@ -1823,7 +1893,7 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
   }
 });
 // Create Razorpay payment link for subscription
-app.post('/api/subscription/payment-link', async (req, res) => {
+app.post('/api/subscription/payment-link', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.body;
     if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
@@ -1918,7 +1988,7 @@ app.post('/api/subscription/verify', verifySubscription);
 app.get('/api/subscription/verify', verifySubscription);
 // --- SERVER STARTUP ---
 
-app.put('/api/invoices/:id', async (req, res) => {
+app.put('/api/invoices/:id', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -1964,6 +2034,38 @@ const startServer = async () => {
         defaultValue: 0
       });
     }
+    if (!('preferences' in schema)) {
+      await qi.addColumn(tableName, 'preferences', {
+        type: DataTypes.JSON,
+        allowNull: false,
+        defaultValue: {}
+      });
+    }
+    if (!('sub_prompt_ts' in schema)) {
+      await qi.addColumn(tableName, 'sub_prompt_ts', {
+        type: DataTypes.BIGINT,
+        allowNull: false,
+        defaultValue: 0
+      });
+    }
+
+    // Store table columns
+    const storeTable = Store.getTableName() as string;
+    const storeSchema = await qi.describeTable(storeTable);
+    if (!('preferences' in storeSchema)) {
+      await qi.addColumn(storeTable, 'preferences', {
+        type: DataTypes.JSON,
+        allowNull: false,
+        defaultValue: {}
+      });
+    }
+    if (!('sub_prompt_ts' in storeSchema)) {
+      await qi.addColumn(storeTable, 'sub_prompt_ts', {
+        type: DataTypes.BIGINT,
+        allowNull: false,
+        defaultValue: 0
+      });
+    }
 
     // InvoiceItem columns
     const itemTable = InvoiceItem.getTableName() as string;
@@ -1981,91 +2083,31 @@ const startServer = async () => {
       });
     }
 
+    // MetalRate table columns
+    const metalTable = MetalRate.getTableName() as string;
+    const metalSchema = await qi.describeTable(metalTable);
+    const metalColumns = ['gold_24k_per_gm', 'gold_22k_per_gm', 'gold_18k_per_gm', 'silver_per_gm', 'platinum_per_gm'];
+    for (const col of metalColumns) {
+      if (!(col in metalSchema)) {
+        await qi.addColumn(metalTable, col, {
+          type: DataTypes.FLOAT,
+          defaultValue: 0
+        });
+      }
+    }
+
     console.log('Models synced with database.');
     
-    // --- BOOTSTRAP DEMO DATA FOR SUPERADMIN & ONE STORE (DEV) ---
-    try {
-      const existingStores = await Store.count();
-      const existingSuperadmins = await User.count({ where: { role: 'superadmin' } });
-      
-      if (existingStores === 0) {
-        const demoStoreId = uuidv4();
-        const ownerUserId = uuidv4();
-        const superAdminId = uuidv4();
-        const customerId = uuidv4();
-        const invoiceId = uuidv4();
-        const p1Id = uuidv4();
-        const p2Id = uuidv4();
-        
-        const ownerPass = await bcrypt.hash('password123', 10);
-        const adminPass = await bcrypt.hash('admin123', 10);
-        
-        await sequelize.transaction(async (t) => {
-          await Store.create({ id: demoStoreId, name: 'Demo Jewels', phone: '9999999999', address: 'MG Road, Mumbai' }, { transaction: t });
-          
-          await User.bulkCreate([
-            { id: ownerUserId, store_id: demoStoreId, name: 'Owner Demo', email: 'owner@demo.store', password_hash: ownerPass, role: 'owner', is_active: true },
-            { id: superAdminId, store_id: demoStoreId, name: 'Super Admin', email: 'officialjeweltrack@gmail.com', password_hash: adminPass, role: 'superadmin', is_active: true }
-          ], { transaction: t });
-          
-          await StoreQuota.create({ id: uuidv4(), store_id: demoStoreId, plan_status: 'active', plan_name: 'base', total_revenue_paid: 999 }, { transaction: t });
-          
-          await Category.bulkCreate([
-            { id: uuidv4(), store_id: demoStoreId, name: 'Gold Rings', metal_type: 'gold', description: 'Gold ring collection' },
-            { id: uuidv4(), store_id: demoStoreId, name: 'Diamond Jewelry', metal_type: 'gold', description: 'Diamond studded pieces' },
-          ], { transaction: t });
-          
-          await Product.bulkCreate([
-            { id: p1Id, store_id: demoStoreId, name: 'Gold Ring Classic', sku: 'GR-001', metal_type: 'gold', karat: '22K', net_weight: 5.2, selling_price: 35000, quantity: 8, min_stock_alert: 2 },
-            { id: p2Id, store_id: demoStoreId, name: 'Diamond Pendant', sku: 'DP-001', metal_type: 'gold', karat: '18K', net_weight: 3.1, selling_price: 65000, quantity: 4, min_stock_alert: 1 }
-          ], { transaction: t });
-          
-          await Customer.create({ id: customerId, store_id: demoStoreId, name: 'Anita Desai', phone: '9876543210' }, { transaction: t });
-          
-          const todayStr = new Date().toISOString().split('T')[0];
-          await Invoice.create({
-            id: invoiceId,
-            store_id: demoStoreId,
-            customer_id: customerId,
-            invoice_number: 'INV-0001',
-            invoice_date: todayStr,
-            subtotal: 100000,
-            discount: 5000,
-            tax_amount: 2850,
-            total_amount: 97950,
-            payment_method: 'upi',
-            payment_status: 'paid'
-          }, { transaction: t });
-          
-          await InvoiceItem.bulkCreate([
-            { id: uuidv4(), invoice_id: invoiceId, product_id: p1Id, product_name: 'Gold Ring Classic', quantity: 2, unit_price: 35000, metal_price: 33000, making_charges: 2000, total_price: 70000, metal_type: 'gold', karat: '22K', weight: 10.4 },
-            { id: uuidv4(), invoice_id: invoiceId, product_id: p2Id, product_name: 'Diamond Pendant', quantity: 1, unit_price: 65000, metal_price: 60000, making_charges: 5000, total_price: 65000, metal_type: 'gold', karat: '18K', weight: 3.1 }
-          ], { transaction: t });
-        });
-        
-        console.log('Bootstrapped demo store and data.');
-      }
-      
-      if (existingSuperadmins === 0) {
-        const demoStore = await Store.findOne();
-        if (demoStore) {
-          const adminPass = await bcrypt.hash('admin123', 10);
-          await User.create({
-            id: uuidv4(),
-            store_id: demoStore.getDataValue('id'),
-            name: 'Super Admin',
-            email: 'officialjeweltrack@gmail.com',
-            password_hash: adminPass,
-            role: 'superadmin',
-            is_active: true
-          });
-          console.log('Created default superadmin: officialjeweltrack@gmail.com / admin123');
-        }
-      }
-    } catch (seedErr) {
-      console.warn('Seed bootstrap skipped:', seedErr);
-    }
-    
+    // Catch-all 404 handler for debugging
+    app.use((req: express.Request, res: express.Response) => {
+      console.log(`[404] ${req.method} ${req.url}`);
+      res.status(404).json({ 
+        success: false, 
+        message: `Route ${req.method} ${req.url} not found on this server`,
+        hint: 'Check if the backend code is up to date on Render.'
+      });
+    });
+
     app.listen(port, () => {
       console.log(`Server running at http://localhost:${port}`);
     });

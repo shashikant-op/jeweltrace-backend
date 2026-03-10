@@ -11,17 +11,49 @@ const uuid_1 = require("uuid");
 const dotenv_1 = __importDefault(require("dotenv"));
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const crypto_1 = __importDefault(require("crypto"));
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const port = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-me';
 const SUBSCRIPTION_AMOUNT_PAISE = parseInt(process.env.SUBSCRIPTION_AMOUNT_PAISE || '100', 10);
 const SUBSCRIPTION_DESCRIPTION = process.env.SUBSCRIPTION_DESCRIPTION || 'JewelTrack Base Plan - Monthly (₹1 Test)';
 const BASE_URL = process.env.BASE_URL || `http://localhost:${port}`;
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
+// Health check route
+app.get('/', (req, res) => {
+    res.json({ success: true, message: 'JewelTrack API is running', env: process.env.NODE_ENV || 'development' });
+});
+app.get('/api/health', (req, res) => {
+    res.json({
+        success: true,
+        status: 'ok',
+        database: sequelize.getDatabaseName(),
+        timestamp: new Date().toISOString(),
+        version: '1.0.1' // Increment this to verify deployment
+    });
+});
+// Diagnostic route to list all registered routes
+app.get('/api/routes', (req, res) => {
+    const routes = [];
+    app._router.stack.forEach((middleware) => {
+        if (middleware.route) {
+            routes.push(`${Object.keys(middleware.route.methods).join(',').toUpperCase()} ${middleware.route.path}`);
+        }
+        else if (middleware.name === 'router') {
+            middleware.handle.stack.forEach((handler) => {
+                if (handler.route) {
+                    routes.push(`${Object.keys(handler.route.methods).join(',').toUpperCase()} ${handler.route.path}`);
+                }
+            });
+        }
+    });
+    res.json({ success: true, routes });
+});
 // Initialize Sequelize with TiDB Cloud individual variables
-const sequelize = new sequelize_1.Sequelize(process.env.DB_DATABASE || 'test', process.env.DB_USERNAME || 'root', process.env.DB_PASSWORD || '', {
-    host: process.env.DB_HOST || 'localhost',
+const sequelize = new sequelize_1.Sequelize(process.env.DB_DATABASE || 'test', process.env.DB_USERNAME || '3vTNZ2nDFDWfTru.root', process.env.DB_PASSWORD || 'c0PVUMdaKq3zc1KJ', {
+    host: process.env.DB_HOST || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com',
     port: parseInt(process.env.DB_PORT || '4000'),
     dialect: 'mysql',
     logging: process.env.NODE_ENV === 'development' ? console.log : false,
@@ -51,6 +83,8 @@ Store.init({
     currency: { type: sequelize_1.DataTypes.STRING(10), defaultValue: 'INR' },
     tax_rate: { type: sequelize_1.DataTypes.FLOAT, defaultValue: 3 },
     upi_id: { type: sequelize_1.DataTypes.STRING(100) },
+    preferences: { type: sequelize_1.DataTypes.JSON, defaultValue: {} },
+    sub_prompt_ts: { type: sequelize_1.DataTypes.BIGINT, defaultValue: 0 },
 }, { sequelize, modelName: 'store', underscored: true });
 class User extends sequelize_1.Model {
 }
@@ -60,7 +94,7 @@ User.init({
     name: { type: sequelize_1.DataTypes.STRING(255), allowNull: false },
     email: { type: sequelize_1.DataTypes.STRING(255), unique: true, allowNull: false },
     password_hash: { type: sequelize_1.DataTypes.STRING(255), allowNull: false },
-    role: { type: sequelize_1.DataTypes.ENUM('owner', 'manager', 'salesperson', 'viewer'), allowNull: false },
+    role: { type: sequelize_1.DataTypes.ENUM('superadmin', 'owner', 'manager', 'salesperson', 'viewer'), allowNull: false },
     avatar_url: { type: sequelize_1.DataTypes.STRING(500) },
     is_active: { type: sequelize_1.DataTypes.BOOLEAN, defaultValue: true },
 }, { sequelize, modelName: 'user', underscored: true });
@@ -139,6 +173,8 @@ InvoiceItem.init({
     product_name: { type: sequelize_1.DataTypes.STRING(255) },
     quantity: { type: sequelize_1.DataTypes.INTEGER, defaultValue: 1 },
     unit_price: { type: sequelize_1.DataTypes.FLOAT, defaultValue: 0 },
+    metal_price: { type: sequelize_1.DataTypes.FLOAT, defaultValue: 0 },
+    making_charges: { type: sequelize_1.DataTypes.FLOAT, defaultValue: 0 },
     discount_percent: { type: sequelize_1.DataTypes.FLOAT, defaultValue: 0 },
     total_price: { type: sequelize_1.DataTypes.FLOAT, defaultValue: 0 },
     metal_type: { type: sequelize_1.DataTypes.STRING(50) },
@@ -177,6 +213,17 @@ Notification.init({
     is_acknowledged: { type: sequelize_1.DataTypes.BOOLEAN, defaultValue: false },
     is_resolved: { type: sequelize_1.DataTypes.BOOLEAN, defaultValue: false },
 }, { sequelize, modelName: 'notification', underscored: true });
+class MetalRate extends sequelize_1.Model {
+}
+MetalRate.init({
+    id: { type: sequelize_1.DataTypes.STRING(36), primaryKey: true },
+    store_id: { type: sequelize_1.DataTypes.STRING(36), allowNull: false, unique: true },
+    gold_24k_per_gm: { type: sequelize_1.DataTypes.FLOAT, defaultValue: 0 },
+    gold_22k_per_gm: { type: sequelize_1.DataTypes.FLOAT, defaultValue: 0 },
+    gold_18k_per_gm: { type: sequelize_1.DataTypes.FLOAT, defaultValue: 0 },
+    silver_per_gm: { type: sequelize_1.DataTypes.FLOAT, defaultValue: 0 },
+    platinum_per_gm: { type: sequelize_1.DataTypes.FLOAT, defaultValue: 0 }
+}, { sequelize, modelName: 'metal_rate', underscored: true });
 // Subscription / Quota tracking per store
 class StoreQuota extends sequelize_1.Model {
 }
@@ -192,7 +239,8 @@ StoreQuota.init({
     plan_started_at: { type: sequelize_1.DataTypes.DATE, allowNull: true },
     payment_link_id: { type: sequelize_1.DataTypes.STRING(64), allowNull: true },
     onboarding_offer_claimed: { type: sequelize_1.DataTypes.BOOLEAN, defaultValue: false },
-    premium_expires_at: { type: sequelize_1.DataTypes.DATE, allowNull: true }
+    premium_expires_at: { type: sequelize_1.DataTypes.DATE, allowNull: true },
+    total_revenue_paid: { type: sequelize_1.DataTypes.FLOAT, defaultValue: 0 }
 }, { sequelize, modelName: 'store_quota', underscored: true });
 // --- ASSOCIATIONS ---
 Store.hasMany(User, { foreignKey: 'store_id' });
@@ -223,6 +271,29 @@ Store.hasMany(Notification, { foreignKey: 'store_id' });
 Notification.belongsTo(Store, { foreignKey: 'store_id' });
 Store.hasOne(StoreQuota, { foreignKey: 'store_id' });
 StoreQuota.belongsTo(Store, { foreignKey: 'store_id' });
+Store.hasOne(MetalRate, { foreignKey: 'store_id' });
+MetalRate.belongsTo(Store, { foreignKey: 'store_id' });
+// --- AUTH MIDDLEWARE ---
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token)
+        return res.status(401).json({ success: false, message: 'No token provided' });
+    jsonwebtoken_1.default.verify(token, JWT_SECRET, (err, user) => {
+        if (err)
+            return res.status(403).json({ success: false, message: 'Invalid or expired token' });
+        req.user = user;
+        next();
+    });
+};
+const authorizeSuperAdmin = (req, res, next) => {
+    if (req.user && req.user.role === 'superadmin') {
+        next();
+    }
+    else {
+        res.status(403).json({ success: false, message: 'Superadmin access required' });
+    }
+};
 // --- API ENDPOINTS ---
 // Email verification model for OTP workflow
 class EmailVerification extends sequelize_1.Model {
@@ -246,6 +317,405 @@ const transporter = useGmail
         secure: process.env.SMTP_SECURE === 'true',
         auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
     });
+// Superadmin Endpoints
+app.get('/api/superadmin/stats', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+    try {
+        const qi = sequelize.getQueryInterface();
+        const sqTable = StoreQuota.getTableName();
+        let hasPlatformEarnings = false;
+        try {
+            const schema = await qi.describeTable(sqTable);
+            hasPlatformEarnings = 'total_revenue_paid' in schema;
+        }
+        catch { }
+        const [totalStores, totalUsers, totalProducts, totalInvoices, totalRevenueResult, totalInventoryResult, totalPlatformEarnings] = await Promise.all([
+            Store.count(),
+            User.count(),
+            Product.count(),
+            Invoice.count(),
+            Invoice.sum('total_amount'),
+            Product.findAll({
+                attributes: [
+                    [sequelize.fn('SUM', sequelize.literal('selling_price * quantity')), 'totalValue']
+                ],
+                raw: true
+            }),
+            hasPlatformEarnings ? StoreQuota.sum('total_revenue_paid') : Promise.resolve(0)
+        ]);
+        const storeStats = await Store.findAll({
+            attributes: [
+                'id', 'name',
+                [sequelize.fn('COUNT', sequelize.fn('DISTINCT', sequelize.col('users.id'))), 'userCount'],
+                [sequelize.fn('COUNT', sequelize.fn('DISTINCT', sequelize.col('products.id'))), 'productCount'],
+                [sequelize.fn('COUNT', sequelize.fn('DISTINCT', sequelize.col('invoices.id'))), 'invoiceCount'],
+                [sequelize.fn('SUM', sequelize.col('invoices.total_amount')), 'totalRevenue'],
+                [sequelize.fn('SUM', sequelize.literal('products.selling_price * products.quantity')), 'inventoryValue']
+            ],
+            include: [
+                { model: User, attributes: [], required: false },
+                { model: Product, attributes: [], required: false },
+                { model: Invoice, attributes: [], required: false },
+                { model: StoreQuota, attributes: [] }
+            ],
+            group: ['store.id'],
+            raw: true
+        });
+        res.json({
+            success: true,
+            stats: {
+                totalStores,
+                totalUsers,
+                totalProducts,
+                totalInvoices,
+                totalRevenue: Number(totalRevenueResult) || 0,
+                totalInventoryValue: Number(totalInventoryResult[0]?.totalValue) || 0,
+                totalPlatformEarnings: Number(totalPlatformEarnings) || 0
+            },
+            storeStats
+        });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+// Public (read-only) stats for demo/fallback
+app.get('/api/superadmin/stats-public', async (req, res) => {
+    try {
+        const qi = sequelize.getQueryInterface();
+        const sqTable = StoreQuota.getTableName();
+        let hasPlatformEarnings = false;
+        try {
+            const schema = await qi.describeTable(sqTable);
+            hasPlatformEarnings = 'total_revenue_paid' in schema;
+        }
+        catch { }
+        const [totalStores, totalUsers, totalProducts, totalInvoices, totalRevenueResult, totalInventoryResult, totalPlatformEarnings] = await Promise.all([
+            Store.count(),
+            User.count(),
+            Product.count(),
+            Invoice.count(),
+            Invoice.sum('total_amount'),
+            Product.findAll({
+                attributes: [
+                    [sequelize.fn('SUM', sequelize.literal('selling_price * quantity')), 'totalValue']
+                ],
+                raw: true
+            }),
+            hasPlatformEarnings ? StoreQuota.sum('total_revenue_paid') : Promise.resolve(0)
+        ]);
+        const storeStats = await Store.findAll({
+            attributes: [
+                'id', 'name',
+                [sequelize.fn('COUNT', sequelize.fn('DISTINCT', sequelize.col('users.id'))), 'userCount'],
+                [sequelize.fn('COUNT', sequelize.fn('DISTINCT', sequelize.col('products.id'))), 'productCount'],
+                [sequelize.fn('COUNT', sequelize.fn('DISTINCT', sequelize.col('invoices.id'))), 'invoiceCount'],
+                [sequelize.fn('SUM', sequelize.col('invoices.total_amount')), 'totalRevenue'],
+                [sequelize.fn('SUM', sequelize.literal('products.selling_price * products.quantity')), 'inventoryValue']
+            ],
+            include: [
+                { model: User, attributes: [], required: false },
+                { model: Product, attributes: [], required: false },
+                { model: Invoice, attributes: [], required: false },
+                { model: StoreQuota, attributes: [] }
+            ],
+            group: ['store.id'],
+            raw: true
+        });
+        res.json({
+            success: true,
+            stats: {
+                totalStores,
+                totalUsers,
+                totalProducts,
+                totalInvoices,
+                totalRevenue: Number(totalRevenueResult) || 0,
+                totalInventoryValue: Number(totalInventoryResult[0]?.totalValue) || 0,
+                totalPlatformEarnings: Number(totalPlatformEarnings) || 0
+            },
+            storeStats
+        });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+app.get('/api/superadmin/leaderboard', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+    try {
+        const leaderboard = await Store.findAll({
+            attributes: [
+                'id', 'name',
+                [sequelize.fn('SUM', sequelize.col('invoices.total_amount')), 'totalRevenue'],
+                [sequelize.fn('COUNT', sequelize.fn('DISTINCT', sequelize.col('invoices.id'))), 'invoiceCount'],
+                [sequelize.fn('SUM', sequelize.literal('products.selling_price * products.quantity')), 'inventoryValue'],
+                [sequelize.fn('COUNT', sequelize.fn('DISTINCT', sequelize.col('products.id'))), 'productCount'],
+            ],
+            include: [
+                { model: Invoice, attributes: [], required: false },
+                { model: Product, attributes: [], required: false }
+            ],
+            group: ['store.id'],
+            order: [[sequelize.literal('totalRevenue'), 'DESC']],
+            limit: 10,
+            raw: true
+        });
+        res.json({
+            success: true,
+            leaderboard
+        });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+app.get('/api/superadmin/stores', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+    try {
+        const stores = await Store.findAll({
+            include: [
+                { model: User, attributes: ['id', 'name', 'email', 'role'] },
+                { model: StoreQuota }
+            ]
+        });
+        res.json({ success: true, stores });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+app.get('/api/superadmin/users', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+    try {
+        const users = await User.findAll({
+            include: [{ model: Store, attributes: ['name'] }],
+            attributes: { exclude: ['password_hash'] }
+        });
+        res.json({ success: true, users });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+app.delete('/api/superadmin/stores/:id', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        // Perform cascading deletes or at least delete the store
+        // For now, let's just delete the store and associated users, etc.
+        await sequelize.transaction(async (t) => {
+            await User.destroy({ where: { store_id: id }, transaction: t });
+            await StoreQuota.destroy({ where: { store_id: id }, transaction: t });
+            await Store.destroy({ where: { id }, transaction: t });
+        });
+        res.json({ success: true, message: 'Store deleted successfully' });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+app.put('/api/superadmin/users/:id/role', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { role } = req.body;
+        await User.update({ role }, { where: { id } });
+        res.json({ success: true, message: 'User role updated successfully' });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+app.get('/api/superadmin/stores/:id/details', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const store = await Store.findByPk(id, {
+            include: [
+                { model: StoreQuota },
+                { model: MetalRate }
+            ]
+        });
+        if (!store)
+            return res.status(404).json({ success: false, message: 'Store not found' });
+        const [usersCount, productsCount, invoicesCount, customersCount, recentInvoices, topProducts] = await Promise.all([
+            User.count({ where: { store_id: id } }),
+            Product.count({ where: { store_id: id } }),
+            Invoice.count({ where: { store_id: id } }),
+            Customer.count({ where: { store_id: id } }),
+            Invoice.findAll({
+                where: { store_id: id },
+                limit: 5,
+                order: [['created_at', 'DESC']],
+                include: [{ model: Customer, attributes: ['name'] }]
+            }),
+            InvoiceItem.findAll({
+                attributes: [
+                    'product_name',
+                    [sequelize.fn('SUM', sequelize.col('quantity')), 'totalQty'],
+                    [sequelize.fn('SUM', sequelize.col('total_price')), 'totalRevenue']
+                ],
+                include: [{
+                        model: Invoice,
+                        as: 'invoice',
+                        where: { store_id: id },
+                        attributes: []
+                    }],
+                group: ['product_name'],
+                order: [[sequelize.fn('SUM', sequelize.col('total_price')), 'DESC']],
+                limit: 5,
+                raw: true
+            })
+        ]);
+        res.json({
+            success: true,
+            store,
+            stats: {
+                usersCount,
+                productsCount,
+                invoicesCount,
+                customersCount
+            },
+            recentInvoices,
+            topProducts
+        });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+app.get('/api/superadmin/search', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+    try {
+        const { q } = req.query;
+        if (!q || String(q).length < 2)
+            return res.json({ success: true, results: { products: [], invoices: [], stores: [] } });
+        const [products, invoices, stores] = await Promise.all([
+            Product.findAll({
+                where: { name: { [sequelize_1.Op.like]: `%${q}%` } },
+                limit: 5,
+                include: [{ model: Store, attributes: ['name'] }]
+            }),
+            Invoice.findAll({
+                where: { invoice_number: { [sequelize_1.Op.like]: `%${q}%` } },
+                limit: 5,
+                include: [{ model: Store, attributes: ['name'] }]
+            }),
+            Store.findAll({
+                where: { name: { [sequelize_1.Op.like]: `%${q}%` } },
+                limit: 5
+            })
+        ]);
+        res.json({
+            success: true,
+            results: { products, invoices, stores }
+        });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+app.get('/api/superadmin/analytics', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+    try {
+        const { range = '30d' } = req.query;
+        const now = new Date();
+        let startDate = new Date();
+        if (range === '7d')
+            startDate.setDate(now.getDate() - 7);
+        else if (range === '30d')
+            startDate.setDate(now.getDate() - 30);
+        else if (range === '90d')
+            startDate.setDate(now.getDate() - 90);
+        else
+            startDate.setFullYear(now.getFullYear() - 1);
+        const startDateStr = startDate.toISOString().split('T')[0];
+        // 1. Revenue Over Time
+        const revenueOverTime = await Invoice.findAll({
+            attributes: [
+                'invoice_date',
+                [sequelize.fn('SUM', sequelize.col('total_amount')), 'daily_revenue']
+            ],
+            where: {
+                invoice_date: { [sequelize_1.Op.gte]: startDateStr }
+            },
+            group: ['invoice_date'],
+            order: [['invoice_date', 'ASC']],
+            raw: true
+        });
+        // 2. Store Growth (Daily & Cumulative)
+        const storeDailyRaw = await Store.findAll({
+            attributes: [
+                [sequelize.fn('DATE', sequelize.col('created_at')), 'date'],
+                [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+            ],
+            where: {
+                created_at: { [sequelize_1.Op.gte]: startDate }
+            },
+            group: [sequelize.fn('DATE', sequelize.col('created_at'))],
+            order: [[sequelize.fn('DATE', sequelize.col('created_at')), 'ASC']],
+            raw: true
+        });
+        // Calculate cumulative stores
+        const totalStoresBeforeRange = await Store.count({
+            where: { created_at: { [sequelize_1.Op.lt]: startDate } }
+        });
+        let runningTotal = totalStoresBeforeRange;
+        const storeGrowth = storeDailyRaw.map(day => {
+            runningTotal += Number(day.count);
+            return {
+                date: day.date,
+                daily: Number(day.count),
+                cumulative: runningTotal
+            };
+        });
+        // 3. Subscription Distribution & Trends
+        const subDistribution = await StoreQuota.findAll({
+            attributes: [
+                'plan_name',
+                [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+            ],
+            group: ['plan_name'],
+            raw: true
+        });
+        // Active vs Trial conversion
+        const activeGrowthRaw = await StoreQuota.findAll({
+            attributes: [
+                [sequelize.fn('DATE', sequelize.col('plan_started_at')), 'date'],
+                [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+            ],
+            where: {
+                plan_status: 'active',
+                plan_started_at: { [sequelize_1.Op.gte]: startDate }
+            },
+            group: [sequelize.fn('DATE', sequelize.col('plan_started_at'))],
+            order: [[sequelize.fn('DATE', sequelize.col('plan_started_at')), 'ASC']],
+            raw: true
+        });
+        const activeTrends = activeGrowthRaw.map(day => ({
+            date: day.date,
+            count: Number(day.count)
+        }));
+        // 4. Most Active Stores (by Invoice Count)
+        const activeStores = await Invoice.findAll({
+            attributes: [
+                'store_id',
+                [sequelize.fn('COUNT', sequelize.col('invoice.id')), 'invoiceCount'],
+                [sequelize.col('store.name'), 'storeName']
+            ],
+            include: [{
+                    model: Store,
+                    attributes: []
+                }],
+            group: ['store_id', 'store.name'],
+            order: [[sequelize.fn('COUNT', sequelize.col('invoice.id')), 'DESC']],
+            limit: 5,
+            raw: true
+        });
+        res.json({
+            success: true,
+            revenueOverTime,
+            storeGrowth,
+            activeTrends,
+            subDistribution,
+            activeStores
+        });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
 app.post('/api/auth/send-otp', async (req, res) => {
     try {
         const { email } = req.body;
@@ -263,9 +733,69 @@ app.post('/api/auth/send-otp', async (req, res) => {
         await transporter.sendMail({
             from: process.env.SMTP_FROM || process.env.SMTP_USER,
             to: email,
-            subject: 'Your JewelTrack verification code',
+            subject: `[JewelTrack] ${otp} is your verification code`,
             text: `Your verification code is ${otp}. It expires in 10 minutes.`,
-            html: `<p>Your verification code is <strong>${otp}</strong>.</p><p>This code expires in 10 minutes.</p>`
+            html: `
+        <div style="margin: 0; padding: 0; background-color: #0f172a; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+          <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;">
+            <tr>
+              <td align="center" style="padding: 40px 20px;">
+                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-image: url('https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?q=80&w=2070&auto=format&fit=crop'); background-size: cover; background-position: center; border-radius: 24px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);">
+                  <tr>
+                    <td style="background-color: rgba(15, 23, 42, 0.85); padding: 60px 40px; text-align: center;">
+                      <!-- Logo Section -->
+                      <div style="margin-bottom: 40px;">
+                        <span style="background-color: #eab308; color: #0f172a; padding: 10px 20px; border-radius: 12px; font-weight: 800; font-size: 24px; letter-spacing: 1px;">JewelTrack</span>
+                      </div>
+
+                      <!-- Content Section -->
+                      <h1 style="color: #ffffff; font-size: 32px; font-weight: 800; margin-bottom: 16px; letter-spacing: -0.5px;">Verify Your Email</h1>
+                      <p style="color: rgba(255, 255, 255, 0.7); font-size: 16px; line-height: 1.6; margin-bottom: 40px; max-width: 400px; margin-left: auto; margin-right: auto;">
+                        Securely manage your jewelry empire. Use the code below to complete your registration.
+                      </p>
+
+                      <!-- OTP Card -->
+                      <div style="text-align: center; margin-bottom: 40px;">
+                        <div style="background-color: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; padding: 32px; display: inline-block; backdrop-filter: blur(10px);">
+                          <span style="font-size: 48px; font-weight: 800; color: #eab308; letter-spacing: 12px; font-family: 'Courier New', Courier, monospace;">${otp}</span>
+                        </div>
+                      </div>
+
+                      <p style="color: rgba(255, 255, 255, 0.5); font-size: 14px; margin-bottom: 0;">
+                        Valid for <strong style="color: #ffffff;">10 minutes</strong>
+                      </p>
+                    </td>
+                  </tr>
+                  <!-- Footer Section -->
+                  <tr>
+                    <td style="background-color: rgba(0, 0, 0, 0.4); padding: 30px; text-align: center; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+                      <div style="margin-bottom: 20px;">
+                        <table border="0" cellpadding="0" cellspacing="0" align="center">
+                          <tr>
+                            <td style="padding: 0 10px;">
+                              <span style="color: #eab308; font-size: 12px; font-weight: 700; text-transform: uppercase; tracking-wider: 1px;">10k+ Stores</span>
+                            </td>
+                            <td style="width: 1px; background-color: rgba(255, 255, 255, 0.2); height: 12px;"></td>
+                            <td style="padding: 0 10px;">
+                              <span style="color: #eab308; font-size: 12px; font-weight: 700; text-transform: uppercase; tracking-wider: 1px;">99.9% Uptime</span>
+                            </td>
+                          </tr>
+                        </table>
+                      </div>
+                      <p style="color: rgba(255, 255, 255, 0.4); font-size: 11px; margin-bottom: 12px;">
+                        Developed by <a href="https://op-shashikant.vercel.app" style="color: #ffffff; text-decoration: underline; font-weight: 600;">Shashikant</a>
+                      </p>
+                      <p style="color: rgba(255, 255, 255, 0.3); font-size: 10px; margin: 0;">
+                        Support: <a href="mailto:officialjeweltrack@gmail.com" style="color: rgba(255, 255, 255, 0.5); text-decoration: none;">officialjeweltrack@gmail.com</a>
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </div>
+      `
         });
         res.json({ success: true });
     }
@@ -318,6 +848,34 @@ app.get('/api/users', async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 });
+app.post('/api/users', async (req, res) => {
+    try {
+        const { storeId, name, email, password, role } = req.body;
+        if (!storeId || !name || !email || !password || !role) {
+            return res.status(400).json({ success: false, message: 'Missing required fields' });
+        }
+        const existingUser = await User.findOne({ where: { email } });
+        if (existingUser) {
+            return res.status(400).json({ success: false, message: 'User with this email already exists' });
+        }
+        const passwordHash = await bcryptjs_1.default.hash(password, 10);
+        const user = await User.create({
+            id: (0, uuid_1.v4)(),
+            store_id: storeId,
+            name,
+            email,
+            password_hash: passwordHash,
+            role,
+            is_active: true
+        });
+        const userJson = user.toJSON();
+        delete userJson.password_hash;
+        res.json({ success: true, user: userJson });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
 app.get('/api/categories', async (req, res) => {
     try {
         const { storeId } = req.query;
@@ -335,6 +893,74 @@ app.get('/api/products', async (req, res) => {
         res.json(products);
     }
     catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+app.get('/api/metal-rates', async (req, res) => {
+    try {
+        const { storeId } = req.query;
+        if (!storeId)
+            return res.status(400).json({ success: false, message: 'storeId required' });
+        console.log("======================================================url", req.url);
+        console.log("======================================================storeId", storeId);
+        // Find or create the metal rate record
+        let [rates, created] = await MetalRate.findOrCreate({
+            where: { store_id: storeId },
+            defaults: {
+                id: (0, uuid_1.v4)(),
+                store_id: storeId,
+                gold_24k_per_gm: 0,
+                gold_22k_per_gm: 0,
+                gold_18k_per_gm: 0,
+                silver_per_gm: 0,
+                platinum_per_gm: 0
+            }
+        });
+        if (created) {
+            console.log(`Created default rates for store ${storeId}`);
+        }
+        else {
+            console.log(`Fetched existing rates for store ${storeId}`);
+        }
+        res.json({ success: true, rates });
+    }
+    catch (error) {
+        console.error("Error fetching metal rates:", error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+app.put('/api/metal-rates', async (req, res) => {
+    try {
+        const { storeId, gold_24k_per_gm, gold_22k_per_gm, gold_18k_per_gm, silver_per_gm, platinum_per_gm } = req.body;
+        if (!storeId)
+            return res.status(400).json({ success: false, message: 'storeId required' });
+        // Find or create the metal rate record
+        let [rates, created] = await MetalRate.findOrCreate({
+            where: { store_id: storeId },
+            defaults: {
+                id: (0, uuid_1.v4)(),
+                store_id: storeId,
+                gold_24k_per_gm: Number(gold_24k_per_gm) || 0,
+                gold_22k_per_gm: Number(gold_22k_per_gm) || 0,
+                gold_18k_per_gm: Number(gold_18k_per_gm) || 0,
+                silver_per_gm: Number(silver_per_gm) || 0,
+                platinum_per_gm: Number(platinum_per_gm) || 0
+            }
+        });
+        if (!created) {
+            await rates.update({
+                gold_24k_per_gm: Number(gold_24k_per_gm) || 0,
+                gold_22k_per_gm: Number(gold_22k_per_gm) || 0,
+                gold_18k_per_gm: Number(gold_18k_per_gm) || 0,
+                silver_per_gm: Number(silver_per_gm) || 0,
+                platinum_per_gm: Number(platinum_per_gm) || 0
+            });
+        }
+        console.log(`${created ? 'Created' : 'Updated'} rates for store ${storeId}:`, rates.toJSON());
+        res.json({ success: true, rates });
+    }
+    catch (error) {
+        console.error("Error updating metal rates:", error);
         res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -520,6 +1146,28 @@ app.put('/api/store/:id', async (req, res) => {
         res.status(400).json({ success: false, message: error.message });
     }
 });
+app.put('/api/store/:id/preferences', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { preferences } = req.body;
+        await Store.update({ preferences }, { where: { id } });
+        res.json({ success: true });
+    }
+    catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+});
+app.put('/api/store/:id/sub-prompt-ts', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { sub_prompt_ts } = req.body;
+        await Store.update({ sub_prompt_ts }, { where: { id } });
+        res.json({ success: true });
+    }
+    catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+});
 app.put('/api/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
@@ -581,7 +1229,8 @@ app.post('/api/register', async (req, res) => {
             ], { transaction: t });
         });
         const user = await User.findByPk(userId, { attributes: { exclude: ['password_hash'] } });
-        res.json({ success: true, user });
+        const token = jsonwebtoken_1.default.sign({ id: user?.getDataValue('id'), role: user?.getDataValue('role'), store_id: user?.getDataValue('store_id') }, JWT_SECRET, { expiresIn: '24h' });
+        res.json({ success: true, user, token });
     }
     catch (error) {
         console.error('Registration error:', error);
@@ -595,7 +1244,8 @@ app.post('/api/login', async (req, res) => {
         if (user && await bcryptjs_1.default.compare(password, user.getDataValue('password_hash'))) {
             const userJson = user.toJSON();
             delete userJson.password_hash;
-            res.json({ success: true, user: userJson });
+            const token = jsonwebtoken_1.default.sign({ id: user.getDataValue('id'), role: user.getDataValue('role'), store_id: user.getDataValue('store_id') }, JWT_SECRET, { expiresIn: '24h' });
+            res.json({ success: true, user: userJson, token });
         }
         else {
             res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -722,12 +1372,6 @@ app.post('/api/invoices', async (req, res) => {
         if (payment_status && !statusAllowed.includes(String(payment_status).toLowerCase()))
             errors.push('Invalid payment status');
         const toFloat = (v) => Number(v || 0);
-        const calcSubtotal = Array.isArray(items) ? items.reduce((s, it) => s + toFloat(it.unit_price) * toFloat(it.quantity), 0) : 0;
-        const calcDiscount = Array.isArray(items) ? items.reduce((s, it) => s + (toFloat(it.unit_price) * toFloat(it.quantity) * (toFloat(it.discount_percent) / 100)), 0) : 0;
-        const expectedTotal = calcSubtotal - calcDiscount + toFloat(tax_amount);
-        const totalOk = Math.abs(expectedTotal - toFloat(total_amount)) < 0.01;
-        if (!totalOk)
-            errors.push('Total mismatch');
         for (const it of Array.isArray(items) ? items : []) {
             if (!(toFloat(it.quantity) >= 1)) {
                 errors.push('Item quantity must be at least 1');
@@ -740,6 +1384,74 @@ app.post('/api/invoices', async (req, res) => {
         }
         if (errors.length)
             return res.status(400).json({ success: false, message: errors[0] });
+        const rates = await (async () => {
+            const r = await MetalRate.findOne({ where: { store_id: storeId } });
+            return r;
+        })();
+        const metalRateObj = rates ? {
+            gold_24k_per_gm: Number(rates.getDataValue('gold_24k_per_gm') || 0),
+            gold_22k_per_gm: Number(rates.getDataValue('gold_22k_per_gm') || 0),
+            gold_18k_per_gm: Number(rates.getDataValue('gold_18k_per_gm') || 0),
+            silver_per_gm: Number(rates.getDataValue('silver_per_gm') || 0),
+            platinum_per_gm: Number(rates.getDataValue('platinum_per_gm') || 0),
+        } : null;
+        if (!metalRateObj) {
+            return res.status(400).json({ success: false, message: 'Metal rates not configured. Set rates in Settings.' });
+        }
+        const productIds = items.map((it) => it.product_id).filter((id) => !!id);
+        const productsMap = {};
+        if (productIds.length) {
+            const dbProducts = await Product.findAll({ where: { id: productIds } });
+            for (const p of dbProducts)
+                productsMap[p.getDataValue('id')] = p;
+        }
+        const computePerGm = (metal, karat) => {
+            const m = (metal || '').toLowerCase();
+            const k = parseInt(String(karat || '').replace(/[^0-9]/g, ''), 10) || 0;
+            if (m === 'gold') {
+                if (k >= 24)
+                    return metalRateObj.gold_24k_per_gm;
+                if (k >= 22)
+                    return metalRateObj.gold_22k_per_gm;
+                if (k >= 18)
+                    return metalRateObj.gold_18k_per_gm;
+                return 0;
+            }
+            if (m === 'silver')
+                return metalRateObj.silver_per_gm;
+            if (m === 'platinum')
+                return metalRateObj.platinum_per_gm;
+            return 0;
+        };
+        const computedItems = [];
+        let computedSubtotal = 0;
+        let computedDiscount = 0;
+        for (const it of items) {
+            const qty = toFloat(it.quantity);
+            const weight = toFloat(it.weight);
+            const disc = toFloat(it.discount_percent);
+            const perGm = computePerGm(it.metal_type, it.karat);
+            const prod = it.product_id ? productsMap[it.product_id] : null;
+            const makingCharges = Number(it.making_charges ?? prod?.getDataValue('making_charges') ?? 0);
+            const metalP = Number(it.metal_price ?? (weight * perGm));
+            const unit = Math.max(0, Math.round((metalP + makingCharges) * 100) / 100);
+            const lineBase = unit * qty;
+            const lineDiscount = lineBase * (disc / 100);
+            const lineTotal = Math.max(0, Math.round((lineBase - lineDiscount) * 100) / 100);
+            computedSubtotal += lineBase;
+            computedDiscount += lineDiscount;
+            computedItems.push({
+                ...it,
+                metal_price: metalP,
+                making_charges: makingCharges,
+                unit_price: unit,
+                total_price: lineTotal
+            });
+        }
+        computedSubtotal = Math.round(computedSubtotal * 100) / 100;
+        computedDiscount = Math.round(computedDiscount * 100) / 100;
+        const taxAmountFinal = toFloat(tax_amount);
+        const computedTotal = Math.round((computedSubtotal - computedDiscount + taxAmountFinal) * 100) / 100;
         const nowMonth = new Date().toISOString().slice(0, 7);
         let quota = await StoreQuota.findOne({ where: { store_id: storeId } });
         if (!quota) {
@@ -799,7 +1511,7 @@ app.post('/api/invoices', async (req, res) => {
                 try {
                     await Invoice.create({
                         id: invoiceId, store_id: storeId, customer_id: finalCustomerId || null, invoice_number, invoice_date,
-                        subtotal, discount, tax_amount, total_amount, payment_method, payment_status, notes
+                        subtotal: computedSubtotal, discount: computedDiscount, tax_amount: taxAmountFinal, total_amount: computedTotal, payment_method, payment_status, notes
                     }, { transaction: t });
                     finalInvoiceNumber = invoice_number;
                     created = true;
@@ -816,10 +1528,11 @@ app.post('/api/invoices', async (req, res) => {
                     throw e;
                 }
             }
-            for (const item of items) {
+            for (const item of computedItems) {
                 await InvoiceItem.create({
                     id: (0, uuid_1.v4)(), invoice_id: invoiceId, product_id: item.product_id, product_name: item.product_name,
-                    quantity: item.quantity, unit_price: item.unit_price, discount_percent: item.discount_percent || 0,
+                    quantity: item.quantity, unit_price: item.unit_price, metal_price: item.metal_price, making_charges: item.making_charges,
+                    discount_percent: item.discount_percent || 0,
                     total_price: item.total_price, metal_type: item.metal_type, karat: item.karat, weight: item.weight
                 }, { transaction: t });
                 if (item.product_id) {
@@ -827,7 +1540,7 @@ app.post('/api/invoices', async (req, res) => {
                 }
             }
             if (finalCustomerId) {
-                await Customer.increment('total_purchases', { by: total_amount, where: { id: finalCustomerId }, transaction: t });
+                await Customer.increment('total_purchases', { by: computedTotal, where: { id: finalCustomerId }, transaction: t });
             }
         });
         if (planStatus === 'trial' && quota.getDataValue('trial_remaining') > 0) {
@@ -836,7 +1549,12 @@ app.post('/api/invoices', async (req, res) => {
         else {
             await quota.update({ invoices_this_month: invoicesCount + 1 });
         }
-        res.json({ success: true, invoice_id: invoiceId, invoice_number: finalInvoiceNumber });
+        res.json({
+            success: true,
+            invoice_id: invoiceId,
+            invoice_number: finalInvoiceNumber,
+            items: computedItems
+        });
     }
     catch (error) {
         console.error('Invoice error:', error);
@@ -872,6 +1590,7 @@ app.get('/api/subscription/status', async (req, res) => {
             success: true,
             plan_status: quota.getDataValue('plan_status'),
             plan_name: quota.getDataValue('plan_name'),
+            plan_started_at: quota.getDataValue('plan_started_at'),
             usage_month: quota.getDataValue('usage_month'),
             invoices_this_month: quota.getDataValue('invoices_this_month'),
             products_this_month: quota.getDataValue('products_this_month'),
@@ -1125,7 +1844,13 @@ app.post('/api/subscription/webhook', express_1.default.raw({ type: 'application
         const currency = payload?.payload?.payment?.entity?.currency || '';
         const status = payload?.payload?.payment?.entity?.status || '';
         if ((status === 'captured' || status === 'authorized') && paidAmount === SUBSCRIPTION_AMOUNT_PAISE && currency === 'INR') {
-            await quota.update({ plan_status: 'active', plan_started_at: new Date(), plan_name: 'base' });
+            const amountInRupees = paidAmount / 100;
+            await quota.update({
+                plan_status: 'active',
+                plan_started_at: new Date(),
+                plan_name: 'base',
+                total_revenue_paid: (quota.getDataValue('total_revenue_paid') || 0) + amountInRupees
+            });
         }
         res.status(200).send('ok');
     }
@@ -1214,7 +1939,13 @@ const verifySubscription = async (req, res) => {
             if (!correctAmount) {
                 return res.status(400).json({ success: false, message: 'Amount mismatch for base plan' });
             }
-            await quota.update({ plan_status: 'active', plan_started_at: new Date(), plan_name: 'base' });
+            const amountInRupees = Number(plData.amount) / 100;
+            await quota.update({
+                plan_status: 'active',
+                plan_started_at: new Date(),
+                plan_name: 'base',
+                total_revenue_paid: (quota.getDataValue('total_revenue_paid') || 0) + amountInRupees
+            });
             return res.json({ success: true });
         }
         return res.status(402).json({ success: false, message: `Payment not completed. Link status: ${status}` });
@@ -1265,7 +1996,80 @@ const startServer = async () => {
                 allowNull: true
             });
         }
+        if (!('total_revenue_paid' in schema)) {
+            await qi.addColumn(tableName, 'total_revenue_paid', {
+                type: sequelize_1.DataTypes.FLOAT,
+                defaultValue: 0
+            });
+        }
+        if (!('preferences' in schema)) {
+            await qi.addColumn(tableName, 'preferences', {
+                type: sequelize_1.DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {}
+            });
+        }
+        if (!('sub_prompt_ts' in schema)) {
+            await qi.addColumn(tableName, 'sub_prompt_ts', {
+                type: sequelize_1.DataTypes.BIGINT,
+                allowNull: false,
+                defaultValue: 0
+            });
+        }
+        // Store table columns
+        const storeTable = Store.getTableName();
+        const storeSchema = await qi.describeTable(storeTable);
+        if (!('preferences' in storeSchema)) {
+            await qi.addColumn(storeTable, 'preferences', {
+                type: sequelize_1.DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {}
+            });
+        }
+        if (!('sub_prompt_ts' in storeSchema)) {
+            await qi.addColumn(storeTable, 'sub_prompt_ts', {
+                type: sequelize_1.DataTypes.BIGINT,
+                allowNull: false,
+                defaultValue: 0
+            });
+        }
+        // InvoiceItem columns
+        const itemTable = InvoiceItem.getTableName();
+        const itemSchema = await qi.describeTable(itemTable);
+        if (!('metal_price' in itemSchema)) {
+            await qi.addColumn(itemTable, 'metal_price', {
+                type: sequelize_1.DataTypes.FLOAT,
+                defaultValue: 0
+            });
+        }
+        if (!('making_charges' in itemSchema)) {
+            await qi.addColumn(itemTable, 'making_charges', {
+                type: sequelize_1.DataTypes.FLOAT,
+                defaultValue: 0
+            });
+        }
+        // MetalRate table columns
+        const metalTable = MetalRate.getTableName();
+        const metalSchema = await qi.describeTable(metalTable);
+        const metalColumns = ['gold_24k_per_gm', 'gold_22k_per_gm', 'gold_18k_per_gm', 'silver_per_gm', 'platinum_per_gm'];
+        for (const col of metalColumns) {
+            if (!(col in metalSchema)) {
+                await qi.addColumn(metalTable, col, {
+                    type: sequelize_1.DataTypes.FLOAT,
+                    defaultValue: 0
+                });
+            }
+        }
         console.log('Models synced with database.');
+        // Catch-all 404 handler for debugging
+        app.use((req, res) => {
+            console.log(`[404] ${req.method} ${req.url}`);
+            res.status(404).json({
+                success: false,
+                message: `Route ${req.method} ${req.url} not found on this server`,
+                hint: 'Check if the backend code is up to date on Render.'
+            });
+        });
         app.listen(port, () => {
             console.log(`Server running at http://localhost:${port}`);
         });

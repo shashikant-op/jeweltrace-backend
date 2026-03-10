@@ -4,13 +4,13 @@ import { http, HttpResponse } from 'msw';
 export const handlers = [
   http.post('http://localhost:3001/api/login', async ({ request }) => {
     const { email } = (await request.json()) as { email: string };
-    if (email === 'rajesh@mehtajewellers.com') {
+    if (email === 'owner@jeweltrack.com') {
       return HttpResponse.json({
         success: true,
         user: {
           id: 'u1',
-          name: 'Rajesh Mehta',
-          email: 'rajesh@mehtajewellers.com',
+          name: 'Store Owner',
+          email: 'owner@jeweltrack.com',
           role: 'owner'
         }
       });
@@ -94,10 +94,10 @@ export const handlers = [
   http.get('http://localhost:3001/api/store', () => {
     return HttpResponse.json({
       id: 's1',
-      name: 'Mehta Jewellers',
-      address: 'Mumbai',
-      gst_number: '27AABCM1234A1Z5',
-      phone: '+91 98765 43210',
+      name: 'JewelTrack Store',
+      address: 'Store Address',
+      gst_number: '27AABCM0000A1Z5',
+      phone: '+91 00000 00000',
       currency: 'INR',
       tax_rate: 3
     });

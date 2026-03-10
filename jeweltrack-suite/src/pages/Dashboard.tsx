@@ -3,7 +3,7 @@ import { StatCard } from "@/components/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { 
   formatCurrency, formatDate 
-} from "@/data/dummy-data";
+} from "@/lib/utils";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -11,7 +11,18 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { useInvoices, useProducts, useCustomers, useRepairs, useDashboardStats, getCustomerName, useMetalRates, calculateProductPrice } from "@/lib/api";
+import { 
+  useInvoices, 
+  useProducts, 
+  useCustomers, 
+  useRepairs, 
+  useDashboardStats, 
+  getCustomerName, 
+  useMetalRates, 
+  calculateProductPrice,
+  useStore,
+  updateStoreSubPromptTs 
+} from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +44,7 @@ export default function Dashboard() {
   const { data: repairs = [], isLoading: loadingRepairs } = useRepairs();
   const { data: stats, isLoading: loadingStats } = useDashboardStats();
   const { data: metalRatesData } = useMetalRates();
+  const { data: store } = useStore();
   const rates = metalRatesData?.rates;
 
   const isLoading = loadingInvoices || loadingProducts || loadingCustomers || loadingRepairs || loadingStats;
@@ -40,33 +52,32 @@ export default function Dashboard() {
   useEffect(() => {
     const checkSubscription = async () => {
       // Only show subscription prompts to owners
-      if (!user || user.role !== 'owner') return;
+      if (!user || user.role !== 'owner' || !store) return;
 
       try {
-        const userStr = localStorage.getItem('user');
-        if (!userStr) return;
-        const u = JSON.parse(userStr);
-        const resp = await fetch(`${API_BASE_URL}/subscription/status?storeId=${u.store_id}`);
+        const resp = await fetch(`${API_BASE_URL}/subscription/status?storeId=${store.id}`);
         const data = await resp.json();
         if (data.success) {
-          const lastTsStr = localStorage.getItem('sub_prompt_ts');
           const nowTs = Date.now();
-          const lastTs = lastTsStr ? parseInt(lastTsStr, 10) : 0;
+          const lastTs = store.sub_prompt_ts ? parseInt(String(store.sub_prompt_ts), 10) : 0;
           const cooldownMs = 24 * 60 * 60 * 1000;
           const cooldownOk = nowTs - lastTs > cooldownMs;
           const trialRemaining = Number(data.trial_remaining ?? 0);
           const threshold = 3;
           const randomOk = Math.random() < 0.5;
+          
           if (data.plan_status !== 'active' && trialRemaining <= threshold && cooldownOk && randomOk) {
             setSubStatus(data);
             setShowSubscription(true);
-            localStorage.setItem('sub_prompt_ts', String(nowTs));
+            await updateStoreSubPromptTs(store.id, nowTs);
           }
         }
-      } catch {}
+      } catch (e) {
+        console.error("Subscription check error:", e);
+      }
     };
     checkSubscription();
-  }, [user]);
+  }, [user, store]);
 
   useEffect(() => {
     const checkOffer = async () => {

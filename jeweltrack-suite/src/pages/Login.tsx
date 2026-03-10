@@ -33,7 +33,7 @@ export default function Login() {
     } catch (error: any) {
       toast({
         title: "Login failed",
-        description: error.message || "Invalid credentials. Try rajesh@mehtajewellers.com / password123",
+        description: error.message || "Invalid credentials. Please try again.",
         variant: "destructive",
       });
     } finally {

@@ -14,7 +14,8 @@ import {
   updateUser, 
   createUser,
   createCategory, 
-  deleteCategory 
+  deleteCategory,
+  updateStorePreferences 
 } from "@/lib/api";
 import { Loader2, Plus, Trash2, Save, UserPlus, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
@@ -243,15 +244,16 @@ export default function SettingsPage() {
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
-      if (store?.id) {
-        const raw = localStorage.getItem(`store_prefs_${store.id}`);
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw);
-            setLowStock(Boolean(parsed.lowStock));
-            setRepairDue(Boolean(parsed.repairDue));
-            setDailySummary(Boolean(parsed.dailySummary));
-          } catch {}
+      if (store?.preferences) {
+        try {
+          const prefs = typeof store.preferences === 'string' 
+            ? JSON.parse(store.preferences) 
+            : store.preferences;
+          setLowStock(prefs.lowStock ?? true);
+          setRepairDue(prefs.repairDue ?? true);
+          setDailySummary(prefs.dailySummary ?? false);
+        } catch (e) {
+          console.error("Failed to parse store preferences:", e);
         }
       }
     }, [store]);
@@ -260,10 +262,11 @@ export default function SettingsPage() {
       if (!store?.id) return;
       setSaving(true);
       try {
-        localStorage.setItem(`store_prefs_${store.id}`, JSON.stringify({
+        await updateStorePreferences(store.id, {
           lowStock, repairDue, dailySummary
-        }));
-        toast({ title: "Success", description: "Preferences saved" });
+        });
+        queryClient.invalidateQueries({ queryKey: ['store'] });
+        toast({ title: "Success", description: "Preferences saved to database" });
       } catch (error: any) {
         toast({ title: "Error", description: error.message || "Failed to save preferences", variant: "destructive" });
       } finally {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Search, Plus, Phone, Mail, Loader2 } from "lucide-react";
-import { formatCurrency } from "@/data/dummy-data";
+import { formatCurrency } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";

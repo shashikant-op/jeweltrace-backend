@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Search, Plus, IndianRupee, Loader2, X, Trash2, Printer, Download, Save, ArrowLeft, MessageSquare } from "lucide-react";
-import { formatCurrency, formatDate } from "@/data/dummy-data";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";

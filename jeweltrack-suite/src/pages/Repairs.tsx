@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Plus, Search, Loader2 } from "lucide-react";
-import { formatCurrency, formatDate } from "@/data/dummy-data";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";

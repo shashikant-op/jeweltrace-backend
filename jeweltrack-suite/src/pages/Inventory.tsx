@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Search, Plus, Download, LayoutGrid, List, Filter, Loader2, MoreVertical, Pencil, Trash2, X } from "lucide-react";
-import { formatCurrency } from "@/data/dummy-data";
+import { formatCurrency } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";

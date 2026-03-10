@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useProducts, createNotification, useNotifications, acknowledgeNotification } from '@/lib/api';
+import { useProducts, createNotification, useNotifications, acknowledgeNotification, useStore } from '@/lib/api';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -9,6 +9,7 @@ const ALERT_SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-p
 export function useLowStockAlert() {
   const { data: products = [], isLoading: isLoadingProducts } = useProducts();
   const { data: notifications, isLoading: isLoadingNotifications, isSuccess: isNotificationsLoaded } = useNotifications();
+  const { data: store } = useStore();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const sessionAlerts = useRef<Set<string>>(new Set()); // Prevents repeat sounds in same session
@@ -36,7 +37,18 @@ export function useLowStockAlert() {
 
   useEffect(() => {
     // CRITICAL: Don't do anything if data is still loading or if it's not successfully loaded yet
-    if (isLoadingProducts || isLoadingNotifications || !isNotificationsLoaded || !products || products.length === 0) return;
+    if (isLoadingProducts || isLoadingNotifications || !isNotificationsLoaded || !products || products.length === 0 || !store) return;
+
+    // Check if low stock alerts are enabled in store preferences
+    let lowStockEnabled = true;
+    if (store.preferences) {
+      try {
+        const prefs = typeof store.preferences === 'string' ? JSON.parse(store.preferences) : store.preferences;
+        lowStockEnabled = prefs.lowStock ?? true;
+      } catch (e) {}
+    }
+
+    if (!lowStockEnabled) return;
 
     const processAlerts = async () => {
       const dismissRaw = localStorage.getItem(DISMISS_KEY);
@@ -133,5 +145,7 @@ export function useLowStockAlert() {
     };
 
     processAlerts();
-  }, [products, notifications, isLoadingProducts, isLoadingNotifications, queryClient, navigate]);
+  }, [products, notifications, isLoadingProducts, isLoadingNotifications, queryClient, navigate, store]);
+
+  return null;
 }
