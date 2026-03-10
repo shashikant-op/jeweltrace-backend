@@ -39,6 +39,9 @@ import { useMetalRates, updateMetalRates } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { Navigate } from "react-router-dom";
 
+const VITE_API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3001').trim().replace(/\/$/, '');
+const API_BASE_URL = `${VITE_API_URL}/api`;
+
 export default function SettingsPage() {
   const { data: store, isLoading: loadingStore } = useStore();
   const { toast } = useToast();
@@ -83,7 +86,7 @@ export default function SettingsPage() {
           address: profileForm.address,
           gst_number: profileForm.gst_number,
           upi_id: profileForm.upi_id,
-          tax_rate: store?.tax_rate ?? 3
+          tax_rate: parseFloat(String(store?.tax_rate || "3"))
         });
         queryClient.invalidateQueries({ queryKey: ['store'] });
         toast({ title: "Success", description: "Store profile updated successfully" });
@@ -206,8 +209,7 @@ export default function SettingsPage() {
                 type="number" 
                 step="0.01"
                 value={taxRate} 
-                onChange={(e) => setTaxRate(parseFloat(e.target.value))}
-              />
+                onChange={(e) => setTaxRate(parseFloat(e.target.value || "0"))}              />
               <p className="text-[10px] text-muted-foreground">Standard jewelry GST is 3% in India</p>
             </div>
             <div className="space-y-2">
@@ -317,7 +319,7 @@ export default function SettingsPage() {
           const userStr = localStorage.getItem('user');
           if (!userStr) return;
           const user = JSON.parse(userStr);
-          const resp = await fetch(`http://localhost:3001/api/subscription/status?storeId=${user.store_id}`);
+          const resp = await fetch(`${API_BASE_URL}/subscription/status?storeId=${user.store_id}`);
           const data = await resp.json();
           if (data.success) setStatus(data);
         } catch {}
@@ -331,7 +333,7 @@ export default function SettingsPage() {
         setCreating(true);
         const userStr = localStorage.getItem('user');
         const user = JSON.parse(userStr || '{}');
-        window.open(`http://localhost:3001/api/subscription/qr?storeId=${user.store_id}`, '_blank');
+        window.open(`${API_BASE_URL}/subscription/qr?storeId=${user.store_id}`, '_blank');
         toast({ title: "Payment Options", description: "Choose Razorpay QR or UPI to pay." });
       } catch (e: any) {
         toast({ title: "Error", description: e.message || "Failed to open payment options", variant: "destructive" });
@@ -344,7 +346,7 @@ export default function SettingsPage() {
       try {
         const userStr = localStorage.getItem('user');
         const user = JSON.parse(userStr || '{}');
-        const resp = await fetch(`http://localhost:3001/api/subscription/activate?storeId=${user.store_id}`);
+        const resp = await fetch(`${API_BASE_URL}/subscription/activate?storeId=${user.store_id}`);
         const data = await resp.json();
         if (data.success) {
           toast({ title: "Plan Activated", description: "Base plan is now active." });
@@ -800,19 +802,34 @@ function MetalRatesSection() {
     e.preventDefault();
     try {
       setSaving(true);
+      
+      // Clean up values before sending: remove commas and parse
+      const parseValue = (val: string) => {
+        const cleaned = val.replace(/,/g, '').trim();
+        return parseFloat(cleaned || "0");
+      };
+
       await updateMetalRates({
-        gold_24k_per_gm: parseFloat(form.gold_24k_per_gm) || 0,
-        gold_22k_per_gm: parseFloat(form.gold_22k_per_gm) || 0,
-        gold_18k_per_gm: parseFloat(form.gold_18k_per_gm) || 0,
-        silver_per_gm: parseFloat(form.silver_per_gm) || 0,
-        platinum_per_gm: parseFloat(form.platinum_per_gm) || 0
+        gold_24k_per_gm: parseValue(form.gold_24k_per_gm),
+        gold_22k_per_gm: parseValue(form.gold_22k_per_gm),
+        gold_18k_per_gm: parseValue(form.gold_18k_per_gm),
+        silver_per_gm: parseValue(form.silver_per_gm),
+        platinum_per_gm: parseValue(form.platinum_per_gm)
       });
       queryClient.invalidateQueries({ queryKey: ['metal-rates'] });
       toast({ title: "Saved", description: "Metal rates updated successfully" });
     } catch (error: any) {
+      console.error("Save rates error:", error);
       toast({ title: "Error", description: error.message || "Failed to update rates", variant: "destructive" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleInputChange = (field: string, value: string) => {
+    // Allow digits, dots, and commas
+    if (value === "" || /^[0-9.,]*$/.test(value)) {
+      setForm(prev => ({ ...prev, [field]: value }));
     }
   };
 
@@ -823,23 +840,58 @@ function MetalRatesSection() {
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="g24">Gold 24k (999)</Label>
-            <Input id="g24" type="number" step="0.01" value={form.gold_24k_per_gm} onChange={(e) => setForm({ ...form, gold_24k_per_gm: e.target.value })} />
+            <Input 
+              id="g24" 
+              type="text" 
+              inputMode="decimal"
+              placeholder="0.00"
+              value={form.gold_24k_per_gm} 
+              onChange={(e) => handleInputChange('gold_24k_per_gm', e.target.value)} 
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="g22">Gold 22k (916)</Label>
-            <Input id="g22" type="number" step="0.01" value={form.gold_22k_per_gm} onChange={(e) => setForm({ ...form, gold_22k_per_gm: e.target.value })} />
+            <Input 
+              id="g22" 
+              type="text" 
+              inputMode="decimal"
+              placeholder="0.00"
+              value={form.gold_22k_per_gm} 
+              onChange={(e) => handleInputChange('gold_22k_per_gm', e.target.value)} 
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="g18">Gold 18k</Label>
-            <Input id="g18" type="number" step="0.01" value={form.gold_18k_per_gm} onChange={(e) => setForm({ ...form, gold_18k_per_gm: e.target.value })} />
+            <Input 
+              id="g18" 
+              type="text" 
+              inputMode="decimal"
+              placeholder="0.00"
+              value={form.gold_18k_per_gm} 
+              onChange={(e) => handleInputChange('gold_18k_per_gm', e.target.value)} 
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="silver">Silver</Label>
-            <Input id="silver" type="number" step="0.01" value={form.silver_per_gm} onChange={(e) => setForm({ ...form, silver_per_gm: e.target.value })} />
+            <Input 
+              id="silver" 
+              type="text" 
+              inputMode="decimal"
+              placeholder="0.00"
+              value={form.silver_per_gm} 
+              onChange={(e) => handleInputChange('silver_per_gm', e.target.value)} 
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="platinum">Platinum</Label>
-            <Input id="platinum" type="number" step="0.01" value={form.platinum_per_gm} onChange={(e) => setForm({ ...form, platinum_per_gm: e.target.value })} />
+            <Input 
+              id="platinum" 
+              type="text" 
+              inputMode="decimal"
+              placeholder="0.00"
+              value={form.platinum_per_gm} 
+              onChange={(e) => handleInputChange('platinum_per_gm', e.target.value)} 
+            />
           </div>
         </div>
       </div>

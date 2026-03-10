@@ -30,6 +30,8 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { QRCodeSVG } from "qrcode.react";
 
+const API_BASE_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api`;
+
 export default function BillingPage() {
   const [search, setSearch] = useState("");
   const [isNewInvoiceOpen, setIsNewInvoiceOpen] = useState(false);
@@ -292,7 +294,7 @@ export default function BillingPage() {
     setIsVerifyingPayment(true);
     try {
       // Assuming we have an endpoint to update payment status
-      await fetch(`http://localhost:3001/api/invoices/${invoiceId}`, {
+      await fetch(`${API_BASE_URL}/invoices/${invoiceId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment_status: 'paid' }),

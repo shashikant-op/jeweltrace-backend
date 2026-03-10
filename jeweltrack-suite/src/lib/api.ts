@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+const VITE_API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3001').trim().replace(/\/$/, '');
+const API_BASE_URL = `${VITE_API_URL}/api`;
 
 const getStoreId = () => {
   const userStr = localStorage.getItem('user');

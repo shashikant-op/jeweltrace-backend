@@ -8,6 +8,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Store, User, Mail, Lock, ShieldCheck, Zap, BarChart3, Globe, Sparkles, CheckCircle2, ExternalLink, Star, Award, Heart, Users } from "lucide-react";
 
+const API_BASE_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api`;
+
 export default function Register() {
   const [storeName, setStoreName] = useState("");
   const [userName, setUserName] = useState("");
@@ -25,7 +27,7 @@ export default function Register() {
     setLoading(true);
     try {
       if (!otpSent) {
-        const res = await fetch('http://localhost:3001/api/auth/send-otp', {
+        const res = await fetch(`${API_BASE_URL}/auth/send-otp`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email }),
@@ -38,7 +40,7 @@ export default function Register() {
           throw new Error(data.message || "Failed to send OTP");
         }
       } else {
-        const res = await fetch('http://localhost:3001/api/auth/verify-otp', {
+        const res = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, otp }),

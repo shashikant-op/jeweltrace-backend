@@ -6,6 +6,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { Navigate } from "react-router-dom";
 
+const API_BASE_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api`;
+
 export default function Subscription() {
   const { user } = useAuth();
 
@@ -26,7 +28,7 @@ export default function Subscription() {
         const userStr = localStorage.getItem('user');
         if (!userStr) return;
         const user = JSON.parse(userStr);
-        const resp = await fetch(`http://localhost:3001/api/subscription/status?storeId=${user.store_id}`);
+        const resp = await fetch(`${API_BASE_URL}/subscription/status?storeId=${user.store_id}`);
         const data = await resp.json();
         if (data.success) setStatus(data);
       } catch {}
@@ -40,7 +42,7 @@ export default function Subscription() {
       setCreating(true);
       const userStr = localStorage.getItem('user');
       const user = JSON.parse(userStr || '{}');
-      window.open(`http://localhost:3001/api/subscription/qr?storeId=${user.store_id}`, '_blank');
+      window.open(`${API_BASE_URL}/subscription/qr?storeId=${user.store_id}`, '_blank');
       toast({ title: "Payment Options", description: "Choose Razorpay QR or UPI to pay." });
     } catch (e: any) {
       toast({ title: "Error", description: e.message || "Failed to open payment options", variant: "destructive" });
@@ -53,7 +55,7 @@ export default function Subscription() {
     try {
       const userStr = localStorage.getItem('user');
       const user = JSON.parse(userStr || '{}');
-      const resp = await fetch(`http://localhost:3001/api/subscription/verify`, {
+      const resp = await fetch(`${API_BASE_URL}/subscription/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ storeId: user.store_id })

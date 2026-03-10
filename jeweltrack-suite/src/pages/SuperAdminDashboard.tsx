@@ -112,7 +112,7 @@ const COLORS = ['#3a86ff', '#8338ec', '#ff006e', '#fb5607', '#ffbe0b'];
 const SuperAdminDashboard = () => {
   const { token, user } = useAuth();
   const { toast } = useToast();
-  const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3001';
+  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [storeStats, setStoreStats] = useState<StoreStat[]>([]);
   const [stores, setStores] = useState<StoreData[]>([]);

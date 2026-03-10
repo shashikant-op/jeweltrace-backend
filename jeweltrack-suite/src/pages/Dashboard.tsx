@@ -19,6 +19,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 
+const API_BASE_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api`;
+
 export default function Dashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -44,7 +46,7 @@ export default function Dashboard() {
         const userStr = localStorage.getItem('user');
         if (!userStr) return;
         const u = JSON.parse(userStr);
-        const resp = await fetch(`http://localhost:3001/api/subscription/status?storeId=${u.store_id}`);
+        const resp = await fetch(`${API_BASE_URL}/subscription/status?storeId=${u.store_id}`);
         const data = await resp.json();
         if (data.success) {
           const lastTsStr = localStorage.getItem('sub_prompt_ts');
@@ -75,7 +77,7 @@ export default function Dashboard() {
         const userStr = localStorage.getItem('user');
         if (!userStr) return;
         const u = JSON.parse(userStr);
-        const resp = await fetch(`http://localhost:3001/api/subscription/offer-status?storeId=${u.store_id}`);
+        const resp = await fetch(`${API_BASE_URL}/subscription/offer-status?storeId=${u.store_id}`);
         const data = await resp.json();
         if (data.success && data.eligible) {
           setShowOnboarding(true);
@@ -90,7 +92,7 @@ export default function Dashboard() {
       const userStr = localStorage.getItem('user');
       if (!userStr) return;
       const u = JSON.parse(userStr);
-      const resp = await fetch('http://localhost:3001/api/subscription/claim-onboarding', {
+      const resp = await fetch(`${API_BASE_URL}/subscription/claim-onboarding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ storeId: u.store_id })
@@ -112,7 +114,7 @@ export default function Dashboard() {
     try {
       const u = user;
       if (!u) return;
-      window.open(`http://localhost:3001/api/subscription/qr?storeId=${u.store_id}`, '_blank');
+      window.open(`${API_BASE_URL}/subscription/qr?storeId=${u.store_id}`, '_blank');
       toast({ title: "Payment Options", description: "Choose Razorpay QR or UPI to pay." });
     } catch (e: any) {
       toast({ title: "Error", description: e.message || "Failed to open payment options", variant: "destructive" });
