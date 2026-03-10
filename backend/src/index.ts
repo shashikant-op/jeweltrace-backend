@@ -20,6 +20,15 @@ const BASE_URL = process.env.BASE_URL || `http://localhost:${port}`;
 app.use(cors());
 app.use(express.json());
 
+// Health check route
+app.get('/', (req, res) => {
+  res.json({ success: true, message: 'JewelTrack API is running', env: process.env.NODE_ENV || 'development' });
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({ success: true, status: 'ok', database: sequelize.getDatabaseName() });
+});
+
 // Initialize Sequelize with TiDB Cloud individual variables
 const sequelize = new Sequelize(
   process.env.DB_DATABASE || 'test',
