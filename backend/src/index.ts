@@ -21,11 +21,11 @@ app.use(cors());
 app.use(express.json());
 
 // Health check route
-app.get('/', (req, res) => {
+app.get('/', (req: express.Request, res: express.Response) => {
   res.json({ success: true, message: 'JewelTrack API is running', env: process.env.NODE_ENV || 'development' });
 });
 
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (req: express.Request, res: express.Response) => {
   res.json({ 
     success: true, 
     status: 'ok', 
@@ -36,7 +36,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Diagnostic route to list all registered routes
-app.get('/api/routes', (req, res) => {
+app.get('/api/routes', (req: express.Request, res: express.Response) => {
   const routes: string[] = [];
   app._router.stack.forEach((middleware: any) => {
     if (middleware.route) {
@@ -343,7 +343,7 @@ const transporter = useGmail
     });
 
 // Superadmin Endpoints
-app.get('/api/superadmin/stats', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+app.get('/api/superadmin/stats', authenticateToken, authorizeSuperAdmin, async (req: express.Request, res: express.Response) => {
   try {
     const qi = sequelize.getQueryInterface();
     const sqTable = StoreQuota.getTableName() as string;
@@ -405,7 +405,7 @@ app.get('/api/superadmin/stats', authenticateToken, authorizeSuperAdmin, async (
 });
 
 // Public (read-only) stats for demo/fallback
-app.get('/api/superadmin/stats-public', async (req, res) => {
+app.get('/api/superadmin/stats-public', async (req: express.Request, res: express.Response) => {
   try {
     const qi = sequelize.getQueryInterface();
     const sqTable = StoreQuota.getTableName() as string;
@@ -464,7 +464,7 @@ app.get('/api/superadmin/stats-public', async (req, res) => {
   }
 });
 
-app.get('/api/superadmin/leaderboard', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+app.get('/api/superadmin/leaderboard', authenticateToken, authorizeSuperAdmin, async (req: express.Request, res: express.Response) => {
   try {
     const leaderboard = await Store.findAll({
       attributes: [
@@ -493,7 +493,7 @@ app.get('/api/superadmin/leaderboard', authenticateToken, authorizeSuperAdmin, a
   }
 });
 
-app.get('/api/superadmin/stores', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+app.get('/api/superadmin/stores', authenticateToken, authorizeSuperAdmin, async (req: express.Request, res: express.Response) => {
   try {
     const stores = await Store.findAll({
       include: [
@@ -507,7 +507,7 @@ app.get('/api/superadmin/stores', authenticateToken, authorizeSuperAdmin, async 
   }
 });
 
-app.get('/api/superadmin/users', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+app.get('/api/superadmin/users', authenticateToken, authorizeSuperAdmin, async (req: express.Request, res: express.Response) => {
   try {
     const users = await User.findAll({
       include: [{ model: Store, attributes: ['name'] }],
@@ -519,7 +519,7 @@ app.get('/api/superadmin/users', authenticateToken, authorizeSuperAdmin, async (
   }
 });
 
-app.delete('/api/superadmin/stores/:id', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+app.delete('/api/superadmin/stores/:id', authenticateToken, authorizeSuperAdmin, async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     // Perform cascading deletes or at least delete the store
@@ -535,7 +535,7 @@ app.delete('/api/superadmin/stores/:id', authenticateToken, authorizeSuperAdmin,
   }
 });
 
-app.put('/api/superadmin/users/:id/role', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+app.put('/api/superadmin/users/:id/role', authenticateToken, authorizeSuperAdmin, async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     const { role } = req.body;
@@ -546,7 +546,7 @@ app.put('/api/superadmin/users/:id/role', authenticateToken, authorizeSuperAdmin
   }
 });
 
-app.get('/api/superadmin/stores/:id/details', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+app.get('/api/superadmin/stores/:id/details', authenticateToken, authorizeSuperAdmin, async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     const store = await Store.findByPk(id, {
@@ -604,7 +604,7 @@ app.get('/api/superadmin/stores/:id/details', authenticateToken, authorizeSuperA
   }
 });
 
-app.get('/api/superadmin/search', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+app.get('/api/superadmin/search', authenticateToken, authorizeSuperAdmin, async (req: express.Request, res: express.Response) => {
   try {
     const { q } = req.query;
     if (!q || String(q).length < 2) return res.json({ success: true, results: { products: [], invoices: [], stores: [] } });
@@ -635,7 +635,7 @@ app.get('/api/superadmin/search', authenticateToken, authorizeSuperAdmin, async 
   }
 });
 
-app.get('/api/superadmin/analytics', authenticateToken, authorizeSuperAdmin, async (req, res) => {
+app.get('/api/superadmin/analytics', authenticateToken, authorizeSuperAdmin, async (req: express.Request, res: express.Response) => {
   try {
     const { range = '30d' } = req.query;
     const now = new Date();
@@ -751,7 +751,7 @@ app.get('/api/superadmin/analytics', authenticateToken, authorizeSuperAdmin, asy
   }
 });
 
-app.post('/api/auth/send-otp', async (req, res) => {
+app.post('/api/auth/send-otp', async (req: express.Request, res: express.Response) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
@@ -840,7 +840,7 @@ app.post('/api/auth/send-otp', async (req, res) => {
   }
 });
 
-app.post('/api/auth/verify-otp', async (req, res) => {
+app.post('/api/auth/verify-otp', async (req: express.Request, res: express.Response) => {
   try {
     const { email, otp } = req.body;
     if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP are required' });
@@ -856,7 +856,7 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   }
 });
 
-app.get('/api/store', async (req, res) => {
+app.get('/api/store', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
     const store = await Store.findByPk(storeId as string);
@@ -866,7 +866,7 @@ app.get('/api/store', async (req, res) => {
   }
 });
 
-app.get('/api/users', async (req, res) => {
+app.get('/api/users', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
     const users = await User.findAll({ 
@@ -879,7 +879,7 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
-app.post('/api/users', async (req, res) => {
+app.post('/api/users', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId, name, email, password, role } = req.body;
     if (!storeId || !name || !email || !password || !role) {
@@ -910,7 +910,7 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
-app.get('/api/categories', async (req, res) => {
+app.get('/api/categories', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
     const categories = await Category.findAll({ where: { store_id: storeId as string } });
@@ -920,7 +920,7 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-app.get('/api/products', async (req, res) => {
+app.get('/api/products', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
     const products = await Product.findAll({ where: { store_id: storeId as string } });
@@ -930,7 +930,7 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
-app.get('/api/metal-rates', async (req, res) => {
+app.get('/api/metal-rates', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
     if (!storeId) return res.status(400).json({ success: false, message: 'storeId required' });
@@ -963,7 +963,7 @@ app.get('/api/metal-rates', async (req, res) => {
   }
 });
 
-app.put('/api/metal-rates', async (req, res) => {
+app.put('/api/metal-rates', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId, gold_24k_per_gm, gold_22k_per_gm, gold_18k_per_gm, silver_per_gm, platinum_per_gm } = req.body;
     if (!storeId) return res.status(400).json({ success: false, message: 'storeId required' });
@@ -999,7 +999,7 @@ app.put('/api/metal-rates', async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
-app.get('/api/customers', async (req, res) => {
+app.get('/api/customers', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
     const customers = await Customer.findAll({ where: { store_id: storeId as string } });
@@ -1009,7 +1009,7 @@ app.get('/api/customers', async (req, res) => {
   }
 });
 
-app.get('/api/invoices', async (req, res) => {
+app.get('/api/invoices', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
     const invoices = await Invoice.findAll({ 
@@ -1022,7 +1022,7 @@ app.get('/api/invoices', async (req, res) => {
   }
 });
 
-app.get('/api/repairs', async (req, res) => {
+app.get('/api/repairs', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
     const repairs = await RepairOrder.findAll({ where: { store_id: storeId as string } });
@@ -1032,7 +1032,7 @@ app.get('/api/repairs', async (req, res) => {
   }
 });
 
-app.get('/api/notifications', async (req, res) => {
+app.get('/api/notifications', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
     const notifications = await Notification.findAll({ 
@@ -1046,7 +1046,7 @@ app.get('/api/notifications', async (req, res) => {
   }
 });
 
-app.post('/api/notifications', async (req, res) => {
+app.post('/api/notifications', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId, product_id, title, message, type } = req.body;
     const notification = await Notification.create({
@@ -1058,7 +1058,7 @@ app.post('/api/notifications', async (req, res) => {
   }
 });
 
-app.put('/api/notifications/:id/read', async (req, res) => {
+app.put('/api/notifications/:id/read', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     await Notification.update({ is_read: true }, { where: { id } });
@@ -1068,7 +1068,7 @@ app.put('/api/notifications/:id/read', async (req, res) => {
   }
 });
 
-app.put('/api/notifications/:id/acknowledge', async (req, res) => {
+app.put('/api/notifications/:id/acknowledge', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     await Notification.update({ is_acknowledged: true, is_read: true }, { where: { id } });
@@ -1078,7 +1078,7 @@ app.put('/api/notifications/:id/acknowledge', async (req, res) => {
   }
 });
 
-app.put('/api/notifications/read-all', async (req, res) => {
+app.put('/api/notifications/read-all', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.body;
     await Notification.update({ is_read: true }, { where: { store_id: storeId, is_read: false } });
@@ -1088,7 +1088,7 @@ app.put('/api/notifications/read-all', async (req, res) => {
   }
 });
 
-app.delete('/api/notifications/:id', async (req, res) => {
+app.delete('/api/notifications/:id', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     await Notification.destroy({ where: { id } });
@@ -1098,7 +1098,7 @@ app.delete('/api/notifications/:id', async (req, res) => {
   }
 });
 
-app.post('/api/products', async (req, res) => {
+app.post('/api/products', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId, ...productData } = req.body;
     const nowMonth = new Date().toISOString().slice(0,7);
@@ -1137,7 +1137,7 @@ app.post('/api/products', async (req, res) => {
   }
 });
 
-app.put('/api/products/:id', async (req, res) => {
+app.put('/api/products/:id', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     const productData = req.body;
@@ -1160,7 +1160,7 @@ app.put('/api/products/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/products/:id', async (req, res) => {
+app.delete('/api/products/:id', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     await Product.destroy({ where: { id } });
@@ -1170,7 +1170,7 @@ app.delete('/api/products/:id', async (req, res) => {
   }
 });
 
-app.put('/api/store/:id', async (req, res) => {
+app.put('/api/store/:id', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     const storeData = req.body;
@@ -1182,7 +1182,7 @@ app.put('/api/store/:id', async (req, res) => {
   }
 });
 
-app.put('/api/store/:id/preferences', async (req, res) => {
+app.put('/api/store/:id/preferences', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     const { preferences } = req.body;
@@ -1193,7 +1193,7 @@ app.put('/api/store/:id/preferences', async (req, res) => {
   }
 });
 
-app.put('/api/store/:id/sub-prompt-ts', async (req, res) => {
+app.put('/api/store/:id/sub-prompt-ts', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     const { sub_prompt_ts } = req.body;
@@ -1204,7 +1204,7 @@ app.put('/api/store/:id/sub-prompt-ts', async (req, res) => {
   }
 });
 
-app.put('/api/users/:id', async (req, res) => {
+app.put('/api/users/:id', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     const { password, ...userData } = req.body;
@@ -1221,7 +1221,7 @@ app.put('/api/users/:id', async (req, res) => {
   }
 });
 
-app.post('/api/categories', async (req, res) => {
+app.post('/api/categories', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId, ...categoryData } = req.body;
     const category = await Category.create({
@@ -1235,7 +1235,7 @@ app.post('/api/categories', async (req, res) => {
   }
 });
 
-app.delete('/api/categories/:id', async (req, res) => {
+app.delete('/api/categories/:id', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     await Category.destroy({ where: { id } });
@@ -1245,7 +1245,7 @@ app.delete('/api/categories/:id', async (req, res) => {
   }
 });
 
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', async (req: express.Request, res: express.Response) => {
   try {
     const { storeName, userName, email, password } = req.body;
     const verification = await EmailVerification.findOne({ where: { email } });
@@ -1278,7 +1278,7 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', async (req: express.Request, res: express.Response) => {
   try {
     const { email, password } = req.body;
     const user = await User.findOne({ where: { email, is_active: true } });
@@ -1296,11 +1296,11 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-app.post('/api/logout', (req, res) => {
+app.post('/api/logout', (req: express.Request, res: express.Response) => {
   res.json({ success: true });
 });
 
-app.get('/api/dashboard/stats', async (req, res) => {
+app.get('/api/dashboard/stats', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
     if (!storeId) return res.status(400).json({ success: false, message: 'storeId is required' });
@@ -1403,7 +1403,7 @@ app.get('/api/dashboard/stats', async (req, res) => {
   }
 });
 
-app.get('/api/customers/lookup', async (req, res) => {
+app.get('/api/customers/lookup', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId, phone } = req.query;
     const customer = await Customer.findOne({ where: { store_id: storeId as string, phone: phone as string } });
@@ -1413,7 +1413,7 @@ app.get('/api/customers/lookup', async (req, res) => {
   }
 });
 
-app.post('/api/invoices', async (req, res) => {
+app.post('/api/invoices', async (req: express.Request, res: express.Response) => {
   try {
     const { 
       storeId, customer_id, customer_name, customer_phone, invoice_date, items, subtotal, 
@@ -1611,7 +1611,7 @@ app.post('/api/invoices', async (req, res) => {
   }
 });
 
-app.get('/api/invoices/:id', async (req, res) => {
+app.get('/api/invoices/:id', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     const invoice = await Invoice.findByPk(id, { 
@@ -1628,7 +1628,7 @@ app.get('/api/invoices/:id', async (req, res) => {
 });
 
 // Subscription status
-app.get('/api/subscription/status', async (req, res) => {
+app.get('/api/subscription/status', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
     let quota = await StoreQuota.findOne({ where: { store_id: storeId as string } });
@@ -1652,7 +1652,7 @@ app.get('/api/subscription/status', async (req, res) => {
   }
 });
 
-app.get('/api/subscription/offer-status', async (req, res) => {
+app.get('/api/subscription/offer-status', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
     if (!storeId) return res.status(400).json({ success: false, message: 'storeId required' });
@@ -1668,7 +1668,7 @@ app.get('/api/subscription/offer-status', async (req, res) => {
   }
 });
 
-app.post('/api/subscription/claim-onboarding', async (req, res) => {
+app.post('/api/subscription/claim-onboarding', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.body;
     if (!storeId) return res.status(400).json({ success: false, message: 'storeId required' });
@@ -1691,7 +1691,7 @@ app.post('/api/subscription/claim-onboarding', async (req, res) => {
   }
 });
 
-app.get('/api/subscription/qr', async (req, res) => {
+app.get('/api/subscription/qr', async (req: express.Request, res: express.Response) => {
   try {
     const storeId = req.query.storeId as string;
     if (!storeId) return res.status(400).send('storeId required');
@@ -1800,7 +1800,7 @@ app.get('/api/subscription/qr', async (req, res) => {
   }
 });
 // Create Razorpay payment link for subscription
-app.get('/api/subscription/upi', async (req, res) => {
+app.get('/api/subscription/upi', async (req: express.Request, res: express.Response) => {
   try {
     const storeId = req.query.storeId as string;
     if (!storeId) return res.status(400).send('storeId required');
