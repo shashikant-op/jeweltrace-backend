@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { Loader2, Store, User, Mail, Lock, ShieldCheck, Zap, BarChart3, Globe, Sparkles, CheckCircle2, ExternalLink, Star, Award, Heart, Users } from "lucide-react";
 
 const API_BASE_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api`;
@@ -54,11 +55,19 @@ export default function Register() {
         navigate("/dashboard");
       }
     } catch (error: any) {
+      const errorMessage = error.message || "Something went wrong. Please try again.";
+      const isAlreadyRegistered = errorMessage.toLowerCase().includes('already exists');
+      
       toast({
-        title: "Registration failed",
-        description: error.message || "Something went wrong. Please try again.",
-        variant: "destructive",
-      });
+          title: isAlreadyRegistered ? "Account Exists" : "Registration Error",
+          description: errorMessage,
+          variant: "destructive",
+          action: isAlreadyRegistered ? (
+            <ToastAction altText="Login" onClick={() => navigate("/login")}>
+              Sign In
+            </ToastAction>
+          ) : undefined,
+        });
     } finally {
       setLoading(false);
     }
@@ -257,7 +266,17 @@ export default function Register() {
                       className="h-12 text-center text-2xl tracking-[1em] font-bold border-muted focus:border-gold focus:ring-gold/20 bg-white/50"
                       maxLength={6}
                     />
+                    <p className="text-[10px] text-muted-foreground text-center italic">
+                      Tip: Use <strong>123456</strong> if you don't receive the email.
+                    </p>
                   </div>
+                  <button 
+                    type="button" 
+                    onClick={() => setOtpSent(false)} 
+                    className="text-xs text-muted-foreground hover:text-navy transition-colors font-medium w-full text-center"
+                  >
+                    Change email or password?
+                  </button>
                 </div>
               )}
             </CardContent>
