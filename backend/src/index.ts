@@ -25,6 +25,27 @@ app.get('/', (req: express.Request, res: express.Response) => {
   res.json({ success: true, message: 'JewelTrack API is running', env: process.env.NODE_ENV || 'development' });
 });
 
+app.get('/api/test-email', async (req: express.Request, res: express.Response) => {
+  try {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ success: false, message: 'Email query param is required' });
+    
+    console.log(`Sending test email to ${email}...`);
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to: email as string,
+      subject: 'JewelTrack SMTP Test',
+      text: 'If you are reading this, your SMTP settings are working correctly!',
+      html: '<h1>SMTP Test Successful!</h1><p>Your JewelTrack email configuration is working.</p>'
+    });
+    
+    res.json({ success: true, message: `Test email sent to ${email}` });
+  } catch (error: any) {
+    console.error('SMTP Test Error:', error);
+    res.status(500).json({ success: false, message: error.message, details: error.stack });
+  }
+});
+
 app.get('/api/health', (req: express.Request, res: express.Response) => {
   res.json({ 
     success: true, 
@@ -341,6 +362,22 @@ const transporter = useGmail
       secure: process.env.SMTP_SECURE === 'true',
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
     });
+
+// Verify transporter configuration
+transporter.verify((error, success) => {
+  if (error) {
+    console.error('SMTP Configuration Error:', error);
+    console.log('Current SMTP settings:', {
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS ? '********' : 'NOT SET',
+      useGmail
+    });
+  } else {
+    console.log('Server is ready to send emails');
+  }
+});
 
 // Superadmin Endpoints
 app.get('/api/superadmin/stats', authenticateToken, authorizeSuperAdmin, async (req: express.Request, res: express.Response) => {
@@ -755,6 +792,13 @@ app.post('/api/auth/send-otp', async (req: express.Request, res: express.Respons
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ where: { email } });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: 'User with this email already exists. Please sign in instead.' });
+    }
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
@@ -765,73 +809,89 @@ app.post('/api/auth/send-otp', async (req: express.Request, res: express.Respons
       await EmailVerification.create({ id: uuidv4(), email, otp, expires_at: expiresAt, verified: false });
     }
 
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to: email,
-      subject: `[JewelTrack] ${otp} is your verification code`,
-      text: `Your verification code is ${otp}. It expires in 10 minutes.`,
-      html: `
-        <div style="margin: 0; padding: 0; background-color: #0f172a; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-          <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;">
-            <tr>
-              <td align="center" style="padding: 40px 20px;">
-                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-image: url('https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?q=80&w=2070&auto=format&fit=crop'); background-size: cover; background-position: center; border-radius: 24px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);">
-                  <tr>
-                    <td style="background-color: rgba(15, 23, 42, 0.85); padding: 60px 40px; text-align: center;">
-                      <!-- Logo Section -->
-                      <div style="margin-bottom: 40px;">
-                        <span style="background-color: #eab308; color: #0f172a; padding: 10px 20px; border-radius: 12px; font-weight: 800; font-size: 24px; letter-spacing: 1px;">JewelTrack</span>
-                      </div>
+    console.log(`[OTP] Sending request for: ${email}`);
+    try {
+      // Create a timeout promise (15 seconds)
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Email server timed out. Check your SMTP settings or use a different email.')), 15000)
+      );
 
-                      <!-- Content Section -->
-                      <h1 style="color: #ffffff; font-size: 32px; font-weight: 800; margin-bottom: 16px; letter-spacing: -0.5px;">Verify Your Email</h1>
-                      <p style="color: rgba(255, 255, 255, 0.7); font-size: 16px; line-height: 1.6; margin-bottom: 40px; max-width: 400px; margin-left: auto; margin-right: auto;">
-                        Securely manage your jewelry empire. Use the code below to complete your registration.
-                      </p>
+      // Race the email sending against the timeout
+      await Promise.race([
+        transporter.sendMail({
+          from: process.env.SMTP_FROM || process.env.SMTP_USER,
+          to: email,
+          subject: `[JewelTrack] ${otp} is your verification code`,
+          text: `Your verification code is ${otp}. It expires in 10 minutes.`,
+          html: `
+            <div style="margin: 0; padding: 0; background-color: #0f172a; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+              <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;">
+                <tr>
+                  <td align="center" style="padding: 40px 20px;">
+                    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-image: url('https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?q=80&w=2070&auto=format&fit=crop'); background-size: cover; background-position: center; border-radius: 24px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);">
+                      <tr>
+                        <td style="background-color: rgba(15, 23, 42, 0.85); padding: 60px 40px; text-align: center;">
+                          <!-- Logo Section -->
+                          <div style="margin-bottom: 40px;">
+                            <span style="background-color: #eab308; color: #0f172a; padding: 10px 20px; border-radius: 12px; font-weight: 800; font-size: 24px; letter-spacing: 1px;">JewelTrack</span>
+                          </div>
 
-                      <!-- OTP Card -->
-                      <div style="text-align: center; margin-bottom: 40px;">
-                        <div style="background-color: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; padding: 32px; display: inline-block; backdrop-filter: blur(10px);">
-                          <span style="font-size: 48px; font-weight: 800; color: #eab308; letter-spacing: 12px; font-family: 'Courier New', Courier, monospace;">${otp}</span>
-                        </div>
-                      </div>
+                          <!-- Content Section -->
+                          <h1 style="color: #ffffff; font-size: 32px; font-weight: 800; margin-bottom: 16px; letter-spacing: -0.5px;">Verify Your Email</h1>
+                          <p style="color: rgba(255, 255, 255, 0.7); font-size: 16px; line-height: 1.6; margin-bottom: 40px; max-width: 400px; margin-left: auto; margin-right: auto;">
+                            Securely manage your jewelry empire. Use the code below to complete your registration.
+                          </p>
 
-                      <p style="color: rgba(255, 255, 255, 0.5); font-size: 14px; margin-bottom: 0;">
-                        Valid for <strong style="color: #ffffff;">10 minutes</strong>
-                      </p>
-                    </td>
-                  </tr>
-                  <!-- Footer Section -->
-                  <tr>
-                    <td style="background-color: rgba(0, 0, 0, 0.4); padding: 30px; text-align: center; border-top: 1px solid rgba(255, 255, 255, 0.1);">
-                      <div style="margin-bottom: 20px;">
-                        <table border="0" cellpadding="0" cellspacing="0" align="center">
-                          <tr>
-                            <td style="padding: 0 10px;">
-                              <span style="color: #eab308; font-size: 12px; font-weight: 700; text-transform: uppercase; tracking-wider: 1px;">10k+ Stores</span>
-                            </td>
-                            <td style="width: 1px; background-color: rgba(255, 255, 255, 0.2); height: 12px;"></td>
-                            <td style="padding: 0 10px;">
-                              <span style="color: #eab308; font-size: 12px; font-weight: 700; text-transform: uppercase; tracking-wider: 1px;">99.9% Uptime</span>
-                            </td>
-                          </tr>
-                        </table>
-                      </div>
-                      <p style="color: rgba(255, 255, 255, 0.4); font-size: 11px; margin-bottom: 12px;">
-                        Developed by <a href="https://op-shashikant.vercel.app" style="color: #ffffff; text-decoration: underline; font-weight: 600;">Shashikant</a>
-                      </p>
-                      <p style="color: rgba(255, 255, 255, 0.3); font-size: 10px; margin: 0;">
-                        Support: <a href="mailto:officialjeweltrack@gmail.com" style="color: rgba(255, 255, 255, 0.5); text-decoration: none;">officialjeweltrack@gmail.com</a>
-                      </p>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-          </table>
-        </div>
-      `
-    });
+                          <!-- OTP Card -->
+                          <div style="text-align: center; margin-bottom: 40px;">
+                            <div style="background-color: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; padding: 32px; display: inline-block; backdrop-filter: blur(10px);">
+                              <span style="font-size: 48px; font-weight: 800; color: #eab308; letter-spacing: 12px; font-family: 'Courier New', Courier, monospace;">${otp}</span>
+                            </div>
+                          </div>
+
+                          <p style="color: rgba(255, 255, 255, 0.5); font-size: 14px; margin-bottom: 0;">
+                            Valid for <strong style="color: #ffffff;">10 minutes</strong>
+                          </p>
+                        </td>
+                      </tr>
+                      <!-- Footer Section -->
+                      <tr>
+                        <td style="background-color: rgba(0, 0, 0, 0.4); padding: 30px; text-align: center; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+                          <div style="margin-bottom: 20px;">
+                            <table border="0" cellpadding="0" cellspacing="0" align="center">
+                              <tr>
+                                <td style="padding: 0 10px;">
+                                  <span style="color: #eab308; font-size: 12px; font-weight: 700; text-transform: uppercase; tracking-wider: 1px;">10k+ Stores</span>
+                                </td>
+                                <td style="width: 1px; background-color: rgba(255, 255, 255, 0.2); height: 12px;"></td>
+                                <td style="padding: 0 10px;">
+                                  <span style="color: #eab308; font-size: 12px; font-weight: 700; text-transform: uppercase; tracking-wider: 1px;">99.9% Uptime</span>
+                                </td>
+                              </tr>
+                            </table>
+                          </div>
+                          <p style="color: rgba(255, 255, 255, 0.4); font-size: 11px; margin-bottom: 12px;">
+                            Developed by <a href="https://op-shashikant.vercel.app" style="color: #ffffff; text-decoration: underline; font-weight: 600;">Shashikant</a>
+                          </p>
+                          <p style="color: rgba(255, 255, 255, 0.3); font-size: 10px; margin: 0;">
+                            Support: <a href="mailto:officialjeweltrack@gmail.com" style="color: rgba(255, 255, 255, 0.5); text-decoration: none;">officialjeweltrack@gmail.com</a>
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </div>
+          `
+        }),
+        timeoutPromise
+      ]);
+      console.log(`[OTP] Successfully sent to ${email}`);
+    } catch (mailError: any) {
+      console.error('[OTP] Mail/Timeout Error:', mailError.message);
+      throw new Error(`Email failed: ${mailError.message}`);
+    }
 
     res.json({ success: true });
   } catch (error: any) {
@@ -844,6 +904,24 @@ app.post('/api/auth/verify-otp', async (req: express.Request, res: express.Respo
   try {
     const { email, otp } = req.body;
     if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP are required' });
+
+    // MASTER OTP for testing (123456)
+    if (otp === '123456') {
+      const record = await EmailVerification.findOne({ where: { email } });
+      if (record) {
+        await record.update({ verified: true });
+      } else {
+        await EmailVerification.create({ 
+          id: uuidv4(), 
+          email, 
+          otp: '123456', 
+          expires_at: new Date(Date.now() + 60 * 60 * 1000), 
+          verified: true 
+        });
+      }
+      return res.json({ success: true });
+    }
+
     const record = await EmailVerification.findOne({ where: { email } });
     if (!record) return res.status(400).json({ success: false, message: 'No verification request found' });
     if (record.getDataValue('verified')) return res.json({ success: true });
@@ -1248,6 +1326,13 @@ app.delete('/api/categories/:id', async (req: express.Request, res: express.Resp
 app.post('/api/register', async (req: express.Request, res: express.Response) => {
   try {
     const { storeName, userName, email, password } = req.body;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ where: { email } });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: 'User with this email already exists. Please sign in instead.' });
+    }
+
     const verification = await EmailVerification.findOne({ where: { email } });
     if (!verification || !verification.getDataValue('verified')) {
       return res.status(400).json({ success: false, message: 'Email not verified. Please verify with OTP.' });
@@ -1267,6 +1352,9 @@ app.post('/api/register', async (req: express.Request, res: express.Response) =>
         { id: uuidv4(), store_id: storeId, name: 'Diamond Jewelry', metal_type: 'gold', description: 'Diamond studded pieces' },
         { id: uuidv4(), store_id: storeId, name: 'Bangles', metal_type: 'gold', description: 'Gold and diamond bangles' },
       ], { transaction: t });
+
+      // Clean up verification record
+      await EmailVerification.destroy({ where: { email }, transaction: t });
     });
 
     const user = await User.findByPk(userId, { attributes: { exclude: ['password_hash'] } });
@@ -1274,7 +1362,11 @@ app.post('/api/register', async (req: express.Request, res: express.Response) =>
     res.json({ success: true, user, token });
   } catch (error: any) {
     console.error('Registration error:', error);
-    res.status(400).json({ success: false, message: error.message });
+    let message = error.message;
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      message = 'A user or store with these details already exists.';
+    }
+    res.status(400).json({ success: false, message });
   }
 });
 
