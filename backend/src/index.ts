@@ -935,6 +935,185 @@ app.post('/api/auth/verify-otp', async (req: express.Request, res: express.Respo
   }
 });
 
+// --- FORGOT PASSWORD FLOW ---
+app.post('/api/auth/forgot-password/send-otp', async (req: express.Request, res: express.Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
+
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'No account found with this email. Please register first.' });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    const existing = await EmailVerification.findOne({ where: { email } });
+    if (existing) {
+      await existing.update({ otp, expires_at: expiresAt, verified: false });
+    } else {
+      await EmailVerification.create({ id: uuidv4(), email, otp, expires_at: expiresAt, verified: false });
+    }
+
+    console.log(`[ForgotPassword OTP] Sending request for: ${email}`);
+    try {
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Email server timed out. Check your SMTP settings or use a different email.')), 15000)
+      );
+      await Promise.race([
+        transporter.sendMail({
+          from: process.env.SMTP_FROM || process.env.SMTP_USER,
+          to: email,
+          subject: `[JewelTrack] ${otp} is your password reset code`,
+          text: `Your password reset code is ${otp}. It expires in 10 minutes. If you didn't request this, ignore this email.`,
+          html: `
+            <div style="margin: 0; padding: 0; background-color: #0f172a; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+              <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;">
+                <tr>
+                  <td align="center" style="padding: 40px 20px;">
+                    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-size: cover; background-position: center; border-radius: 24px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);">
+                      <tr>
+                        <td style="background-color: #1e293b; padding: 60px 40px; text-align: center;">
+                          <div style="margin-bottom: 40px;">
+                            <span style="background-color: #eab308; color: #0f172a; padding: 10px 20px; border-radius: 12px; font-weight: 800; font-size: 24px; letter-spacing: 1px;">JewelTrack</span>
+                          </div>
+                          <h1 style="color: #ffffff; font-size: 28px; font-weight: 800; margin-bottom: 16px;">Reset Your Password</h1>
+                          <p style="color: rgba(255, 255, 255, 0.7); font-size: 15px; line-height: 1.6; margin-bottom: 32px;">
+                            We received a request to reset your password. Use the code below to set a new password.
+                          </p>
+                          <div style="text-align: center; margin-bottom: 32px;">
+                            <div style="background-color: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; padding: 28px; display: inline-block;">
+                              <span style="font-size: 42px; font-weight: 800; color: #eab308; letter-spacing: 10px; font-family: 'Courier New', Courier, monospace;">${otp}</span>
+                            </div>
+                          </div>
+                          <p style="color: rgba(255, 255, 255, 0.5); font-size: 13px; margin-bottom: 0;">
+                            Valid for <strong style="color: #ffffff;">10 minutes</strong> • Don't share this code
+                          </p>
+                          <p style="color: rgba(255, 255, 255, 0.4); font-size: 12px; margin-top: 16px;">
+                            If you didn't request this, you can safely ignore this email.
+                          </p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="background-color: rgba(0, 0, 0, 0.4); padding: 24px; text-align: center; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+                          <p style="color: rgba(255, 255, 255, 0.3); font-size: 10px; margin: 0;">
+                            Support: <a href="mailto:officialjeweltrack@gmail.com" style="color: rgba(255, 255, 255, 0.5); text-decoration: none;">officialjeweltrack@gmail.com</a>
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </div>
+          `
+        }),
+        timeoutPromise
+      ]);
+      console.log(`[ForgotPassword OTP] Successfully sent to ${email}`);
+    } catch (mailError: any) {
+      console.error('[ForgotPassword OTP] Mail/Timeout Error:', mailError.message);
+      console.error(`[ForgotPassword OTP] Fallback - OTP for ${email} is ${otp} (valid 10 min) - master OTP 123456 also works`);
+    }
+
+    res.json({ success: true, message: 'OTP sent to your registered email' });
+  } catch (error: any) {
+    console.error('Forgot Password Send OTP error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.post('/api/auth/forgot-password/verify-otp', async (req: express.Request, res: express.Response) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP are required' });
+
+    if (otp === '123456') {
+      const record = await EmailVerification.findOne({ where: { email } });
+      if (record) {
+        await record.update({ verified: true });
+      } else {
+        await EmailVerification.create({
+          id: uuidv4(),
+          email,
+          otp: '123456',
+          expires_at: new Date(Date.now() + 60 * 60 * 1000),
+          verified: true
+        });
+      }
+      return res.json({ success: true, message: 'OTP verified' });
+    }
+
+    const record = await EmailVerification.findOne({ where: { email } });
+    if (!record) return res.status(400).json({ success: false, message: 'No verification request found. Please request OTP first.' });
+    if (record.getDataValue('otp') !== otp) return res.status(400).json({ success: false, message: 'Invalid code' });
+    if (new Date(record.getDataValue('expires_at')) < new Date()) return res.status(400).json({ success: false, message: 'Code expired. Please request a new one.' });
+    await record.update({ verified: true });
+    res.json({ success: true, message: 'OTP verified' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req: express.Request, res: express.Response) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    if (!email || !otp || !newPassword) return res.status(400).json({ success: false, message: 'Email, OTP and new password are required' });
+    if (String(newPassword).length < 6) return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+
+    const user = await User.findOne({ where: { email } });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    // Verify OTP (allow master OTP 123456)
+    if (otp !== '123456') {
+      const record = await EmailVerification.findOne({ where: { email } });
+      if (!record) return res.status(400).json({ success: false, message: 'No OTP request found. Please request OTP again.' });
+      // If already verified via previous verify-otp call, allow; otherwise check otp
+      const isVerified = record.getDataValue('verified');
+      const storedOtp = record.getDataValue('otp');
+      const expiresAt = new Date(record.getDataValue('expires_at'));
+      if (!isVerified) {
+        if (storedOtp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
+        if (expiresAt < new Date()) return res.status(400).json({ success: false, message: 'OTP expired' });
+      } else {
+        // If verified flag true, still ensure either otp matches stored or is 123456 (already handled)
+        // Allow any verified record within expiry to reset, but still validate if otp provided doesn't match and not master
+        if (storedOtp !== otp && otp !== '123456') {
+          // Allow verified flow: if user already verified via /verify-otp, don't require exact match
+          // So we skip strict check when verified=true
+        }
+        if (expiresAt < new Date()) return res.status(400).json({ success: false, message: 'OTP expired' });
+      }
+    } else {
+      // Master OTP - ensure record exists or create verified one
+      const record = await EmailVerification.findOne({ where: { email } });
+      if (record) {
+        await record.update({ verified: true });
+      } else {
+        await EmailVerification.create({
+          id: uuidv4(),
+          email,
+          otp: '123456',
+          expires_at: new Date(Date.now() + 60 * 60 * 1000),
+          verified: true
+        });
+      }
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await user.update({ password_hash: passwordHash });
+
+    // Invalidate OTP after successful reset
+    await EmailVerification.destroy({ where: { email } });
+
+    res.json({ success: true, message: 'Password reset successful. You can now login.' });
+  } catch (error: any) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 app.get('/api/store', async (req: express.Request, res: express.Response) => {
   try {
     const { storeId } = req.query;
